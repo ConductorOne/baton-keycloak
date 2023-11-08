@@ -11,13 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	jwt "github.com/golang-jwt/jwt/v4"
 )
 
 const userUrl = "/admin/realms/master/users"
-const groupUrl = "/admin/realms/master/groups"
-const membersUrl = "/admin/realms/master/groups/%s/members"
+const groupsUrl = "/admin/realms/master/groups"
+const membersUrl = "/admin/realms/master/groups/{id}/members"
 const refreshUrl = "/realms/master/protocol/openid-connect/token"
 
 type Client struct {
@@ -68,7 +67,6 @@ func isExpired(accessToken string) (bool, error) {
 		//return true, fmt.Errorf("unable to decode access token")
 	}
 
-	spew.Dump(claims)
 	exp, ok := claims["exp"]
 	if !ok {
 		return true, fmt.Errorf("malformed access token")
@@ -79,7 +77,6 @@ func isExpired(accessToken string) (bool, error) {
 		return true, fmt.Errorf("unable to convert expiration to float64")
 	}
 
-	spew.Dump(expiry)
 	expTimestamp := time.Unix(int64(expiry), 0)
 	currentTime := time.Now()
 
@@ -108,8 +105,6 @@ func (c *Client) refreshToken(ctx context.Context) error {
 
 		request.Header.Add("Content-type", "application/x-www-form-urlencoded")
 
-		spew.Dump(request)
-
 		response, err := c.httpClient.Do(request.WithContext(ctx))
 		if err != nil {
 			return err
@@ -127,7 +122,6 @@ func (c *Client) refreshToken(ctx context.Context) error {
 			return err
 		}
 		c.accessToken = token.AccessToken
-		fmt.Printf("Access token: %s \n\n", c.accessToken)
 		return nil
 	}
 	return nil
@@ -165,7 +159,7 @@ func (c *Client) ListUsers(ctx context.Context) ([]*User, error) {
 func (c *Client) ListGroups(ctx context.Context) ([]*Group, error) {
 	var ret []*Group
 
-	req, err := http.NewRequest(http.MethodGet, "http://"+path.Join(c.baseUrl, groupUrl), nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+path.Join(c.baseUrl, groupsUrl), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +175,27 @@ func (c *Client) ListGroups(ctx context.Context) ([]*Group, error) {
 		return nil, err
 	}
 
+	return ret, nil
+}
+
+func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
+	var ret *Group
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+path.Join(c.baseUrl, groupsUrl, groupId), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	groupBytes, err := c.do(ctx, req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.NewDecoder(groupBytes).Decode(&ret)
+	if err != nil {
+		return nil, err
+	}
 	return ret, nil
 }
 

@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -18,6 +19,23 @@ type groupBuilder struct {
 
 func (o *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return groupResourceType
+}
+
+func (o *groupBuilder) Fetch(ctx context.Context, resourceId *v2.ResourceId) (*v2.Resource, annotations.Annotations, error) {
+	//var ret *v2.Resource
+	if resourceId.ResourceType != groupResourceType.Id {
+		return nil, nil, fmt.Errorf("invalid resource type")
+	}
+	group, err := o.client.GetGroup(ctx, resourceId.Resource)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to get group")
+	}
+	ret, err := sdkResource.NewGroupResource(group.Name, o.ResourceType(ctx), group.Id, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create new group resource")
+	}
+
+	return ret, nil, nil
 }
 
 // List returns all the users from the database as resource objects.

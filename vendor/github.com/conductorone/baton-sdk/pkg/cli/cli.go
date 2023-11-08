@@ -13,6 +13,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
 	"github.com/conductorone/baton-sdk/pkg/logging"
 	"github.com/conductorone/baton-sdk/pkg/types"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -269,6 +270,47 @@ func NewCmd[T any, PtrT *T](
 		},
 	}
 
+	refreshCmd := &cobra.Command{
+		Use:   "refresh",
+		Short: "Refresh a specific resource",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := loadConfig(cmd, cfg)
+			if err != nil {
+				return err
+			}
+
+			runCtx, err := initLogger(
+				ctx,
+				name,
+				logging.WithLogFormat(v.GetString("log-format")),
+				logging.WithLogLevel(v.GetString("log-level")),
+			)
+			if err != nil {
+				return err
+			}
+
+			c, err := getConnector(runCtx, cfg)
+			if err != nil {
+				return err
+			}
+
+			// List the resouce
+			r, err := c.FetchResource(ctx, &v2.ResourcesServiceFetchResourceRequest{
+				ResourceId: &v2.ResourceId{
+					ResourceType: v.GetString("resource-type"),
+					Resource:     v.GetString("resource-id")}})
+			if err != nil {
+				return err
+			}
+
+			spew.Dump(r)
+
+			return nil
+		},
+	}
+	refreshCmd.Flags().String("resource-id", "", "The ID for the resource to refresh")
+	refreshCmd.Flags().String("resource-type", "", "The type for the resource to refresh")
+	cmd.AddCommand(refreshCmd)
 	cmd.AddCommand(grpcServerCmd)
 	cmd.AddCommand(capabilitiesCmd)
 
