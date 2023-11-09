@@ -33,15 +33,16 @@ type Syncer interface {
 
 // syncer orchestrates a connector sync and stores the results using the provided datasource.Writer.
 type syncer struct {
-	c1zManager        manager.Manager
-	c1zPath           string
-	store             connectorstore.Writer
-	connector         types.ConnectorClient
-	state             State
-	runDuration       time.Duration
-	transitionHandler func(s Action)
-	progressHandler   func(p *Progress)
-	tmpDir            string
+	c1zManager            manager.Manager
+	c1zPath               string
+	store                 connectorstore.Writer
+	connector             types.ConnectorClient
+	state                 State
+	runDuration           time.Duration
+	transitionHandler     func(s Action)
+	progressHandler       func(p *Progress)
+	tmpDir                string
+	partialSyncResourceId *v2.ResourceId
 
 	skipEGForResourceType map[string]bool
 }
@@ -145,14 +146,19 @@ func (s *syncer) Sync(ctx context.Context) error {
 
 		switch stateAction.Op {
 		case InitOp:
+			fmt.Printf("\n\n\n In init Op \n\n\n")
 			s.state.FinishAction(ctx)
 			// FIXME(jirwin): Disabling syncing assets for now
 			// s.state.PushAction(ctx, Action{Op: SyncAssetsOp})
-			s.state.PushAction(ctx, Action{Op: SyncGrantExpansionOp})
-			s.state.PushAction(ctx, Action{Op: SyncGrantsOp})
-			s.state.PushAction(ctx, Action{Op: SyncEntitlementsOp})
-			s.state.PushAction(ctx, Action{Op: SyncResourcesOp})
-			s.state.PushAction(ctx, Action{Op: SyncResourceTypesOp})
+			if s.partialSyncResourceId != nil {
+				s.state.PushAction(ctx, Action{Op: PartialResourceSyncOp})
+			} else {
+				s.state.PushAction(ctx, Action{Op: SyncGrantExpansionOp})
+				s.state.PushAction(ctx, Action{Op: SyncGrantsOp})
+				s.state.PushAction(ctx, Action{Op: SyncEntitlementsOp})
+				s.state.PushAction(ctx, Action{Op: SyncResourcesOp})
+				s.state.PushAction(ctx, Action{Op: SyncResourceTypesOp})
+			}
 
 			err = s.Checkpoint(ctx)
 			if err != nil {
@@ -207,9 +213,23 @@ func (s *syncer) Sync(ctx context.Context) error {
 				return err
 			}
 			continue
+		case PartialResourceSyncOp:
+			fmt.Printf("\n\n\n In Partial Resource Sync op \n\n\n")
+			l.Info("Partial sync selected: ", zap.String("resource_type", s.partialSyncResourceId.ResourceType), zap.String("resource_id", s.partialSyncResourceId.Resource))
+			err := s.partialSyncResource(ctx)
+			if err != nil {
+				return err
+			}
+			s.state.FinishAction(ctx)
+			continue
 		default:
 			return fmt.Errorf("unexpected sync step")
 		}
+	}
+
+	err = s.Checkpoint(ctx)
+	if err != nil {
+		return err
 	}
 
 	err = s.store.EndSync(ctx)
@@ -383,6 +403,54 @@ func (s *syncer) syncResources(ctx context.Context) error {
 			return err
 		}
 	}
+
+	return nil
+}
+
+// syncResources fetches a given resource from the connector, and returns a slice of new child resources to fetch.
+func (s *syncer) partialSyncResource(ctx context.Context) error {
+	req := &v2.ResourcesServiceFetchResourceRequest{
+		ResourceId: s.partialSyncResourceId}
+
+	/*if s.state.ParentResourceTypeID(ctx) != "" && s.state.ParentResourceID(ctx) != "" {
+		req.ParentResourceId = &v2.ResourceId{
+			ResourceType: s.state.ParentResourceTypeID(ctx),
+			Resource:     s.state.ParentResourceID(ctx),
+		}
+	}*/
+
+	resp, err := s.connector.FetchResource(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	s.handleProgress(ctx, s.state.Current(), 1)
+
+	/*if resp.NextPageToken == "" {
+		s.state.FinishAction(ctx)
+	} else {
+		err = s.state.NextPage(ctx, resp.NextPageToken)
+		if err != nil {
+			return err
+		}
+	}*/
+
+	// Check if we've already synced this resource, skip it if we have
+
+	/*err = s.validateResourceTraits(ctx, resp.Resource)
+	if err != nil {
+		return err
+	}*/
+
+	err = s.store.PutResource(ctx, resp.Resource)
+	if err != nil {
+		return err
+	}
+
+	// err = s.getSubResources(ctx, r)
+	// if err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -1397,6 +1465,12 @@ func WithC1ZPath(path string) SyncOpt {
 func WithTmpDir(path string) SyncOpt {
 	return func(s *syncer) {
 		s.tmpDir = path
+	}
+}
+
+func WithPartialSync(resourceId *v2.ResourceId) SyncOpt {
+	return func(s *syncer) {
+		s.partialSyncResourceId = resourceId
 	}
 }
 

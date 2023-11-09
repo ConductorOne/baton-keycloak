@@ -16,7 +16,7 @@ import (
 
 const userUrl = "/admin/realms/master/users"
 const groupsUrl = "/admin/realms/master/groups"
-const membersUrl = "/admin/realms/master/groups/{id}/members"
+const membersUrl = "/admin/realms/master/groups/%s/members"
 const refreshUrl = "/realms/master/protocol/openid-connect/token"
 
 type Client struct {
