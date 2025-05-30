@@ -27,8 +27,6 @@ spec:
       labels:
         app: wcs-keycloak-cone-connector
         app.kubernetes.io/managed-by: cloud-console
-      annotations:
-        iam.gke.io/gcp-service-account: "wcs-keycloak-cone-connector@semi-wcs-dev.iam.gserviceaccount.com"
     spec:
       containers:
         - name: wcs-keycloak-cone-connector
@@ -45,6 +43,7 @@ spec:
               --keycloak_client_id="$KEYCLOAK_CLIENT_ID"
               --keycloak_client_secret="$KEYCLOAK_CLIENT_SECRET"
               --realm="$KEYCLOAK_REALM"
+              --display_name="$KEYCLOAK_DISPLAY_NAME"
           envFrom:
             - secretRef:
                 name: wcs-keycloak-cone-connector

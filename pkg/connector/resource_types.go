@@ -2,6 +2,7 @@ package connector
 
 import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 )
 
 var (
@@ -9,6 +10,7 @@ var (
 		Id:          "user",
 		DisplayName: "User",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_USER},
+		Annotations: annotations.New(&v2.SkipEntitlementsAndGrants{}),
 	}
 	groupResourceType = &v2.ResourceType{
 		Id:          "group",

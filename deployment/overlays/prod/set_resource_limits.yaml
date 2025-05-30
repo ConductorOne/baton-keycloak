@@ -6,14 +6,20 @@ metadata:
   name: wcs-keycloak-cone-connector
   namespace: wcs-keycloak-cone-connector
 spec:
+  selector: 
+    matchLabels:
+      app: wcs-keycloak-cone-connector 
   template:
+    metadata: 
+      labels:
+        app: wcs-keycloak-cone-connector
     spec:
       containers:
         - name: wcs-keycloak-cone-connector
           resources:
             requests:
-              cpu: "5m"
-              memory: "20Mi"
+              cpu: "20m"
+              memory: "40Mi"
             limits:
-              cpu: "300m"
+              cpu: "500m"
               memory: "0.5G"

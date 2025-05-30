@@ -25,6 +25,7 @@ var (
 	keycloakclientSecretField = field.StringField("keycloak_client_secret", field.WithDescription("The client secret to use for authentication"), field.WithRequired(true))
 	batonClientIDField        = field.StringField("baton_client_id", field.WithDescription("The Baton client ID"), field.WithRequired(true))
 	batonClientSecretField    = field.StringField("baton_client_secret", field.WithDescription("The Baton client secret"), field.WithRequired(true))
+	displayNameField          = field.StringField("display_name", field.WithDescription("How you want this connector to be named in Conductor One"), field.WithRequired(true))
 )
 
 var configuration = field.NewConfiguration([]field.SchemaField{
@@ -34,6 +35,7 @@ var configuration = field.NewConfiguration([]field.SchemaField{
 	keycloakclientSecretField,
 	batonClientIDField,
 	batonClientSecretField,
+	displayNameField,
 })
 
 var version = "dev"
@@ -71,8 +73,9 @@ func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, e
 	keycloakRealm := v.GetString(realmField.FieldName)
 	keycloakClientID := v.GetString(keycloakclientField.FieldName)
 	keycloakClientSecret := v.GetString(keycloakclientSecretField.FieldName)
+	displayName := v.GetString(displayNameField.FieldName)
 
-	cb, err := connectorSchema.New(ctx, keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
+	cb, err := connectorSchema.New(ctx, keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret, displayName)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err

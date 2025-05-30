@@ -56,8 +56,7 @@ func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, stri
 		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
 	}
 
-	max := 300
-
+	max := 100 // change to 100 because that's the max that keycloak allows. 
 	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
 		First: pointer(first),
 		Max:   pointer(max),

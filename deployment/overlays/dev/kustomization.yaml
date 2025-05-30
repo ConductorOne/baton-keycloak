@@ -7,4 +7,5 @@ patches:
 - path: set_resource_limits.yaml
 - path: set_castai_annotations.yaml
 - path: set_gcp_annotations.yaml
+- path: secretprovider.yaml
 

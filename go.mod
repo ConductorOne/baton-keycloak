@@ -7,7 +7,7 @@ toolchain go1.24.2
 require (
 	github.com/Clarilab/gocloaksession v1.14.0
 	github.com/Nerzal/gocloak/v13 v13.9.0
-	github.com/conductorone/baton-sdk v0.3.8
+	github.com/conductorone/baton-sdk v0.2.91
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/spf13/viper v1.19.0
 	go.uber.org/zap v1.27.0

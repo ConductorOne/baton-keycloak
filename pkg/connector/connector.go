@@ -18,6 +18,7 @@ type Connector struct {
 	realm        string
 	clientID     string
 	clientSecret string
+	displayName  string
 }
 
 // ResourceSyncers returns ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -37,7 +38,7 @@ func (c *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.R
 // Metadata returns metadata about the connector for C1 in the logs and whatnot. It will also display in the UI. Sadly emojis are not supported.
 func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
-		DisplayName: "Keycloak",
+		DisplayName: c.displayName,
 		Description: "Connector syncing users and groups from Keycloak",
 	}, nil
 }
@@ -56,12 +57,17 @@ func (c *Connector) Close() error {
 }
 
 // Actually create a Keycloak connector.
-func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string) (*Connector, error) {
+func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string, displayName string) (*Connector, error) {
 	l := ctxzap.Extract(ctx)
 	keycloakClient, err := keycloak.NewClient(keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
 	if err != nil {
 		l.Error("error creating Keycloak client for some reason", zap.Error(err))
 		return nil, err
+	}
+
+	// Set a default displayName if user didn't provide one on the command line
+	if displayName == "" {
+		displayName = "Keycloak"
 	}
 
 	return &Connector{
@@ -70,5 +76,6 @@ func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, ke
 		realm:        keycloakRealm,
 		clientID:     keycloakClientID,
 		clientSecret: keycloakClientSecret,
+		displayName:  displayName,
 	}, nil
 }

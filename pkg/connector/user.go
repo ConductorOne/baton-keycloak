@@ -83,17 +83,16 @@ func (o *userBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 			return nil, "", nil, err
 		}
 
-		// Create an entitlement for each group membership
-		membershipEntitlement := &v2.Entitlement{
-			Id:          fmt.Sprintf("user:%s:group:%s", userID, *group.ID),
-			DisplayName: fmt.Sprintf("Membership in %s", *group.Name),
+		entitlement := &v2.Entitlement{
+			Id:          fmt.Sprintf("group:%s", *group.ID),
+			DisplayName: fmt.Sprintf("Group: %s", *group.Name),
 			Description: fmt.Sprintf("Membership in the %s group", *group.Name),
 			GrantableTo: []*v2.ResourceType{userResourceType},
-			Slug:        "membership",
+			Slug:        "group",
 			Resource:    groupResource,
 		}
 
-		entitlements = append(entitlements, membershipEntitlement)
+		entitlements = append(entitlements, entitlement)
 	}
 
 	return entitlements, "", nil, nil
