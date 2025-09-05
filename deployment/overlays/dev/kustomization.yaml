@@ -1,0 +1,11 @@
+images:
+- name: wcs-keycloak-cone-connector
+  newName: europe-docker.pkg.dev/semi-wcs-dev/keycloak-baton/baton-keycloak:latest # DONT DO THIS IN PROD!!
+resources:
+- ../../base
+patches:
+- path: set_resource_limits.yaml
+- path: set_castai_annotations.yaml
+- path: set_gcp_annotations.yaml
+- path: secretprovider.yaml
+

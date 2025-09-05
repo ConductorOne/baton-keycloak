@@ -4,43 +4,78 @@ import (
 	"context"
 	"io"
 
-	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"github.com/spiros-spiros/baton-keycloak/pkg/keycloak"
+	"go.uber.org/zap"
 )
 
-type Connector struct{ keyCloakClient *client.Client }
+type Connector struct {
+	client       *keycloak.Client
+	serverURL    string
+	realm        string
+	clientID     string
+	clientSecret string
+	displayName  string
+}
 
-// ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
-func (d *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
+// ResourceSyncers returns ResourceSyncer for each resource type that should be synced from the upstream service.
+func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	return []connectorbuilder.ResourceSyncer{
-		newUserBuilder(d.keyCloakClient),
-		newGroupBuilder(d.keyCloakClient),
+		newUserBuilder(c),
+		newGroupBuilder(c),
 	}
 }
 
 // Asset takes an input AssetRef and attempts to fetch it using the connector's authenticated http client
-// It streams a response, always starting with a metadata object, following by chunked payloads for the asset.
-func (d *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.ReadCloser, error) {
+// crossing my fingers that this is not needed tbh.
+func (c *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.ReadCloser, error) {
 	return "", nil, nil
 }
 
-// Metadata returns metadata about the connector.
-func (d *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
+// Metadata returns metadata about the connector for C1 in the logs and whatnot. It will also display in the UI. Sadly emojis are not supported.
+func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
-		DisplayName: "Keycloak",
-		Description: "A baton connector for the keycloak idP",
+		DisplayName: c.displayName,
+		Description: "Connector syncing users and groups from Keycloak",
 	}, nil
 }
 
-// Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
-// to be sure that they are valid.
-func (d *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
+// Validate is called to ensure that the connector is properly configured. It should test API credentials
+func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
 	return nil, nil
 }
 
-// New returns a new instance of the connector.
-func New(ctx context.Context, baseUrl, accessToken string) (*Connector, error) {
-	return &Connector{keyCloakClient: client.New(accessToken, baseUrl)}, nil
+func (c *Connector) Close() error {
+	// Only close the Keycloak client connection
+	if c.client != nil {
+		return c.client.Close()
+	}
+	return nil
+}
+
+// Actually create a Keycloak connector.
+func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string, displayName string) (*Connector, error) {
+	l := ctxzap.Extract(ctx)
+	keycloakClient, err := keycloak.NewClient(keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
+	if err != nil {
+		l.Error("error creating Keycloak client for some reason", zap.Error(err))
+		return nil, err
+	}
+
+	// Set a default displayName if user didn't provide one on the command line
+	if displayName == "" {
+		displayName = "Keycloak"
+	}
+
+	return &Connector{
+		client:       keycloakClient,
+		serverURL:    keycloakServerURL,
+		realm:        keycloakRealm,
+		clientID:     keycloakClientID,
+		clientSecret: keycloakClientSecret,
+		displayName:  displayName,
+	}, nil
 }

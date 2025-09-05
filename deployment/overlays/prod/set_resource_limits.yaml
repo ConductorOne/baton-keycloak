@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: wcs-keycloak-cone-connector
+  name: wcs-keycloak-cone-connector
+  namespace: wcs-keycloak-cone-connector
+spec:
+  selector: 
+    matchLabels:
+      app: wcs-keycloak-cone-connector 
+  template:
+    metadata: 
+      labels:
+        app: wcs-keycloak-cone-connector
+    spec:
+      containers:
+        - name: wcs-keycloak-cone-connector
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "40Mi"
+            limits:
+              cpu: "500m"
+              memory: "0.5G"

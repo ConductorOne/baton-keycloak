@@ -1,0 +1,12 @@
+images:
+- name: europe-docker.pkg.dev/semi-wcs-dev/keycloak-baton/baton-keycloak
+  newName: europe-docker.pkg.dev/semi-wcs-prod/keycloak-baton/baton-keycloak
+  digest: sha256:b2a8ae99b011c0fca1e24ee96468128eee2c32eb7af8c219d6b0ccb582cda5c8 # no latest tags in prod! 
+resources:
+- ../../base
+patches:
+- path: set_resource_limits.yaml
+- path: set_castai_annotations.yaml
+- path: set_gcp_annotations.yaml
+- path: secretprovider.yaml
+

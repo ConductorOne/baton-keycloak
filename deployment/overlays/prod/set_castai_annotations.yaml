@@ -1,0 +1,8 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wcs-keycloak-cone-connector
+  namespace: wcs-keycloak-cone-connector
+  annotations: 
+    workloads.cast.ai/min-replicas: "1"
+    workloads.cast.ai/max-replicas: "1"
