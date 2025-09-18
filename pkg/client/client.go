@@ -17,7 +17,7 @@ type Client struct {
 	session      gocloaksession.GoCloakSession
 }
 
-var defaultMax = pointer(1)
+var defaultMax = pointer(100)
 
 func NewClient(serverURL, realm, clientID, clientSecret string) (*Client, error) {
 	session, err := gocloaksession.NewSession(clientID, clientSecret, realm, serverURL)
