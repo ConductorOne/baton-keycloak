@@ -27,7 +27,6 @@ func main() {
 	}
 
 	cmd.Version = version
-
 	err = cmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -37,18 +36,24 @@ func main() {
 
 func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, error) {
 	l := ctxzap.Extract(ctx)
+	if err := ValidateConfig(v); err != nil {
+		return nil, err
+	}
 
-	cb, err := connector.New(ctx, v.GetString("base-url"), v.GetString("access-token"))
+	keycloakServerURL := v.GetString(keycloakServerURLField.FieldName)
+	keycloakRealm := v.GetString(keycloakRealmField.FieldName)
+	keycloakClientID := v.GetString(keycloakClientIDField.FieldName)
+	keycloakClientSecret := v.GetString(keycloakClientSecretField.FieldName)
+
+	cb, err := connector.New(ctx, keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err
 	}
-
-	c, err := connectorbuilder.NewConnector(ctx, cb)
+	connector, err := connectorbuilder.NewConnector(ctx, cb)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err
 	}
-
-	return c, nil
+	return connector, nil
 }

@@ -1,223 +1,129 @@
 package client
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"path"
-	"strings"
-	"time"
+	"strconv"
 
-	"github.com/davecgh/go-spew/spew"
-	jwt "github.com/golang-jwt/jwt/v4"
+	"github.com/Clarilab/gocloaksession"
+	"github.com/Nerzal/gocloak/v13"
 )
 
-const userUrl = "/admin/realms/master/users"
-const groupUrl = "/admin/realms/master/groups"
-const membersUrl = "/admin/realms/master/groups/%s/members"
-const refreshUrl = "/realms/master/protocol/openid-connect/token"
-
 type Client struct {
-	accessToken string
-	httpClient  *http.Client
-	baseUrl     string
+	client       *gocloak.GoCloak
+	realm        string
+	clientID     string
+	clientSecret string
+	session      gocloaksession.GoCloakSession
 }
 
-type AccessToken struct {
-	AccessToken string `json:"access_token"`
+var defaultMax = pointer(1)
+
+func NewClient(serverURL, realm, clientID, clientSecret string) (*Client, error) {
+	session, err := gocloaksession.NewSession(clientID, clientSecret, realm, serverURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{
+		client:       gocloak.NewClient(serverURL),
+		realm:        realm,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		session:      session,
+	}, nil
 }
 
-type User struct {
-	Id                         string        `json:"id"`
-	CreatedTimestamp           int64         `json:"createdTimestamp"`
-	Username                   string        `json:"username"`
-	Enabled                    bool          `json:"enabled"`
-	Totp                       bool          `json:"totp"`
-	EmailVerified              bool          `json:"emailVerified"`
-	DisableableCredentialTypes []interface{} `json:"disableableCredentialTypes"`
-	RequiredActions            []interface{} `json:"requiredActions"`
-	NotBefore                  int           `json:"notBefore"`
-	Access                     struct {
-		ManageGroupMembership bool `json:"manageGroupMembership"`
-		View                  bool `json:"view"`
-		MapRoles              bool `json:"mapRoles"`
-		Impersonate           bool `json:"impersonate"`
-		Manage                bool `json:"manage"`
-	} `json:"access"`
+func (c *Client) AddUserToGroup(ctx context.Context, userID, groupID string) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.AddUserToGroup(ctx, token.AccessToken, c.realm, userID, groupID)
 }
 
-type Group struct {
-	Id        string        `json:"id"`
-	Name      string        `json:"name"`
-	Path      string        `json:"path"`
-	SubGroups []interface{} `json:"subGroups"`
+func (c *Client) RemoveUserFromGroup(ctx context.Context, userID, groupID string) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.DeleteUserFromGroup(ctx, token.AccessToken, c.realm, userID, groupID)
 }
 
-func isExpired(accessToken string) (bool, error) {
-	claims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(accessToken, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte("<YOUR VERIFICATION KEY>"), nil
+func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
+	}
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get users: %w", err)
+	}
+
+	if len(users) == 0 {
+		return nil, "", nil
+	}
+
+	return users, strconv.Itoa(first + *defaultMax), nil
+}
+
+func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int) ([]*gocloak.User, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	members, err := c.client.GetGroupMembers(ctx, token.AccessToken, c.realm, groupID, gocloak.GetGroupsParams{
+		First: pointer(first),
+		Max:   defaultMax,
 	})
 
 	if err != nil {
-		return true, fmt.Errorf("error: %s", err.Error())
+		return nil, "", fmt.Errorf("failed to get group members: %w", err)
 	}
 
-	spew.Dump(claims)
-	exp, ok := claims["exp"]
-	if !ok {
-		return true, fmt.Errorf("malformed access token")
-	}
-
-	expiry, ok := exp.(float64)
-	if !ok {
-		return true, fmt.Errorf("unable to convert expiration to float64")
-	}
-
-	spew.Dump(expiry)
-	expTimestamp := time.Unix(int64(expiry), 0)
-	currentTime := time.Now()
-
-	if expTimestamp.Before(currentTime) {
-		return true, nil
-	}
-
-	return false, nil
+	return members, strconv.Itoa(first + len(members)), nil
 }
 
-func (c *Client) refreshToken(ctx context.Context) error {
-	isExpired, err := isExpired(c.accessToken)
+func (c *Client) GetGroups(ctx context.Context, first int) ([]*gocloak.Group, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
-		return err
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
 	}
-	if isExpired {
-		var token AccessToken
-		request, err := http.NewRequest(http.MethodPost, "http://"+path.Join(c.baseUrl, refreshUrl), strings.NewReader(`username=keshav&password=c1test12345&client_id=admin-cli&grant_type=password`))
-		if err != nil {
-			return fmt.Errorf("http request failed %s", err.Error())
-		}
 
-		request.Header.Add("Content-type", "application/x-www-form-urlencoded")
-
-		spew.Dump(request)
-
-		response, err := c.httpClient.Do(request.WithContext(ctx))
-		if err != nil {
-			return err
-		}
-		defer response.Body.Close()
-
-		ret, err := io.ReadAll(response.Body)
-
-		if err != nil {
-			return err
-		}
-
-		err = json.Unmarshal(ret, &token)
-		if err != nil {
-			return err
-		}
-		c.accessToken = token.AccessToken
-		return nil
+	groups, err := c.client.GetGroups(ctx, token.AccessToken, c.realm, gocloak.GetGroupsParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get groups: %w", err)
 	}
+
+	if len(groups) == 0 {
+		return nil, "", nil
+	}
+
+	return groups, strconv.Itoa(first + len(groups)), nil
+}
+
+func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.Group, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.GetUserGroups(ctx, token.AccessToken, c.realm, userID, gocloak.GetGroupsParams{})
+}
+
+func (c *Client) Close() error {
 	return nil
 }
 
-func New(accessToken string, baseUrl string) *Client {
-	return &Client{
-		accessToken: accessToken,
-		baseUrl:     baseUrl,
-		httpClient:  &http.Client{Timeout: 10 * time.Second}}
-}
-
-func (c *Client) ListUsers(ctx context.Context) ([]*User, error) {
-	var ret []*User
-
-	req, err := http.NewRequest(http.MethodGet, "http://"+path.Join(c.baseUrl, userUrl), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	userBytes, err := c.do(ctx, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.NewDecoder(userBytes).Decode(&ret)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func (c *Client) ListGroups(ctx context.Context) ([]*Group, error) {
-	var ret []*Group
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+path.Join(c.baseUrl, groupUrl), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	groupBytes, err := c.do(ctx, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.NewDecoder(groupBytes).Decode(&ret)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func (c *Client) ListGroupMembers(ctx context.Context, groupId string) ([]*User, error) {
-	var ret []*User
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+path.Join(c.baseUrl, fmt.Sprintf(membersUrl, groupId)), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	userBytes, err := c.do(ctx, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.NewDecoder(userBytes).Decode(&ret)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func (c *Client) do(ctx context.Context, req *http.Request) (io.Reader, error) {
-	err := c.refreshToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Add("Authorization", "Bearer "+c.accessToken)
-	response, err := c.httpClient.Do(req.WithContext(ctx))
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer response.Body.Close()
-
-	ret, err := io.ReadAll(response.Body)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes.NewBuffer(ret), nil
+func pointer[T any](v T) *T {
+	return &v
 }
