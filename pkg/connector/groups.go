@@ -10,6 +10,8 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -51,15 +53,13 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 func (o *groupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
-	// Create a membership entitlement for the group
-	membershipEntitlement := &v2.Entitlement{
-		Id:          fmt.Sprintf("group:%s:membership", resource.Id.Resource),
-		DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-		Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-		GrantableTo: []*v2.ResourceType{userResourceType},
-		Slug:        "membership",
-		Resource:    resource,
-	}
+	membershipEntitlement := entitlement.NewAssignmentEntitlement(
+		resource,
+		"membership",
+		entitlement.WithDisplayName(fmt.Sprintf("Membership in %s", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Membership in the %s group", resource.DisplayName)),
+		entitlement.WithGrantableTo(userResourceType),
+	)
 
 	entitlements = append(entitlements, membershipEntitlement)
 	return entitlements, "", nil, nil
@@ -88,20 +88,13 @@ func (o *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	for _, user := range users {
 		userResource := userResources[*user.ID]
 
-		grant := &v2.Grant{
-			Id: fmt.Sprintf("grant:%s:%s", resource.Id.Resource, *user.ID),
-			Entitlement: &v2.Entitlement{
-				Id:          fmt.Sprintf("group:%s:membership", resource.Id.Resource),
-				DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-				Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-				GrantableTo: []*v2.ResourceType{userResourceType},
-				Slug:        "membership",
-				Resource:    resource,
-			},
-			Principal: userResource,
-		}
+		newGrant := grant.NewGrant(
+			resource,
+			"membership",
+			userResource,
+		)
 
-		grants = append(grants, grant)
+		grants = append(grants, newGrant)
 	}
 
 	if len(users) == 0 {
@@ -150,26 +143,15 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 	l.Info("Successfully added user to group")
 
 	// Create and return the grant
-	grant := &v2.Grant{
-		Id: fmt.Sprintf("grant:%s:%s", groupID, userID),
-		Entitlement: &v2.Entitlement{
-			Id:          fmt.Sprintf("group:%s:membership", groupID),
-			DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-			Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-			GrantableTo: []*v2.ResourceType{userResourceType},
-			Slug:        "membership",
-			Resource:    resource,
+	newGrant := grant.NewGrant(resource, "membership", &v2.Resource{
+		Id: &v2.ResourceId{
+			ResourceType: userResourceType.Id,
+			Resource:     userID,
 		},
-		Principal: &v2.Resource{
-			Id: &v2.ResourceId{
-				ResourceType: userResourceType.Id,
-				Resource:     userID,
-			},
-		},
-	}
-	l.Info("Created grant", zap.String("grant_id", grant.Id))
+	})
+	l.Info("Created grant", zap.String("grant_id", newGrant.Id))
 
-	return []*v2.Grant{grant}, nil, nil
+	return []*v2.Grant{newGrant}, nil, nil
 }
 
 func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
