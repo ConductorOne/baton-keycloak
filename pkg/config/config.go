@@ -1,8 +1,7 @@
-package main
+package config
 
 import (
 	"github.com/conductorone/baton-sdk/pkg/field"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -26,24 +25,19 @@ var (
 		"keycloak-client-secret",
 		field.WithDescription("The client secret for the client you made."),
 		field.WithRequired(true),
+		field.WithIsSecret(true),
 	)
-
-	ConfigurationFields = []field.SchemaField{keycloakServerURLField, keycloakRealmField, keycloakClientIDField, keycloakClientSecretField}
-
-	FieldRelationships = []field.SchemaFieldRelationship{}
 )
 
-// ValidateConfig is run after the configuration is loaded, and should return an
-// error if it isn't valid. Implementing this function is optional, it only
-// needs to perform extra validations that cannot be encoded with configuration
-// parameters.
-func ValidateConfig(v *viper.Viper) error {
-	return nil
-}
-
-var configuration = field.NewConfiguration([]field.SchemaField{
-	keycloakServerURLField,
-	keycloakRealmField,
-	keycloakClientIDField,
-	keycloakClientSecretField,
-})
+//go:generate go run ./gen
+var Config = field.NewConfiguration(
+	[]field.SchemaField{
+		keycloakServerURLField,
+		keycloakRealmField,
+		keycloakClientIDField,
+		keycloakClientSecretField,
+	},
+	field.WithConnectorDisplayName("Keycloak"),
+	field.WithHelpUrl("/docs/baton/keycloak"),
+	field.WithIconUrl("/static/app-icons/keycloak.svg"),
+)
