@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-keycloak/pkg/client"
@@ -112,21 +111,8 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 		zap.String("entitlement_id", entitlement.Id),
 	)
 
-	// The entitlement ID should be in the format: group:<groupID>:membership
-	parts := strings.Split(entitlement.Id, ":")
-	l.Info("Split entitlement ID parts", zap.Strings("parts", parts))
-	if len(parts) != 3 || parts[0] != "group" || parts[2] != "membership" {
-		l.Error("Invalid entitlement ID format")
-		return nil, nil, fmt.Errorf("invalid entitlement ID format: %s", entitlement.Id)
-	}
-
 	// Get the group ID from the entitlement ID
-	groupID := parts[1]
-	if groupID == "" {
-		l.Error("Group ID not found in entitlement ID")
-		return nil, nil, fmt.Errorf("group ID not found in entitlement ID")
-	}
-	l.Info("Extracted group ID", zap.String("group_id", groupID))
+	groupID := entitlement.Resource.Id.Resource
 
 	userID := resource.Id.Resource
 
@@ -143,7 +129,7 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 	l.Info("Successfully added user to group")
 
 	// Create and return the grant
-	newGrant := grant.NewGrant(resource, "membership", &v2.Resource{
+	newGrant := grant.NewGrant(entitlement.Resource, "membership", &v2.Resource{
 		Id: &v2.ResourceId{
 			ResourceType: userResourceType.Id,
 			Resource:     userID,
@@ -161,20 +147,7 @@ func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 		zap.String("entitlement_id", grant.Entitlement.Id),
 	)
 
-	// Extract group ID from the entitlement ID
-	parts := strings.Split(grant.Entitlement.Id, ":")
-	if len(parts) != 3 || parts[0] != "group" || parts[2] != "membership" {
-		l.Error("Invalid entitlement ID format")
-		return nil, fmt.Errorf("invalid entitlement ID format: %s", grant.Entitlement.Id)
-	}
-
-	groupID := parts[1]
-	if groupID == "" {
-		l.Error("Group ID not found in entitlement ID")
-		return nil, fmt.Errorf("group ID not found in entitlement ID")
-	}
-	l.Info("Extracted group ID", zap.String("group_id", groupID))
-
+	groupID := grant.Entitlement.Resource.Id.Resource
 	userID := grant.Principal.Id.Resource
 
 	// Remove user from group
