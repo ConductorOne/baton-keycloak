@@ -54,7 +54,7 @@ func (o *groupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, 
 
 	membershipEntitlement := entitlement.NewAssignmentEntitlement(
 		resource,
-		"membership",
+		"member",
 		entitlement.WithDisplayName(fmt.Sprintf("Membership in %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Membership in the %s group", resource.DisplayName)),
 		entitlement.WithGrantableTo(userResourceType),
@@ -82,7 +82,7 @@ func (o *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 
 		newGrant := grant.NewGrant(
 			resource,
-			"membership",
+			"member",
 			userResource,
 		)
 
@@ -122,7 +122,7 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 	l.Info("Successfully added user to group")
 
 	// Create and return the grant
-	newGrant := grant.NewGrant(entitlement.Resource, "membership", &v2.Resource{
+	newGrant := grant.NewGrant(entitlement.Resource, "member", &v2.Resource{
 		Id: &v2.ResourceId{
 			ResourceType: userResourceType.Id,
 			Resource:     userID,
