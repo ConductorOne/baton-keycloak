@@ -3,13 +3,14 @@ package connector
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -51,15 +52,13 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 func (o *groupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
-	// Create a membership entitlement for the group
-	membershipEntitlement := &v2.Entitlement{
-		Id:          fmt.Sprintf("group:%s:membership", resource.Id.Resource),
-		DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-		Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-		GrantableTo: []*v2.ResourceType{userResourceType},
-		Slug:        "membership",
-		Resource:    resource,
-	}
+	membershipEntitlement := entitlement.NewAssignmentEntitlement(
+		resource,
+		"member",
+		entitlement.WithDisplayName(fmt.Sprintf("Membership in %s", resource.DisplayName)),
+		entitlement.WithDescription(fmt.Sprintf("Membership in the %s group", resource.DisplayName)),
+		entitlement.WithGrantableTo(userResourceType),
+	)
 
 	entitlements = append(entitlements, membershipEntitlement)
 	return entitlements, "", nil, nil
@@ -75,33 +74,19 @@ func (o *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
-	// Create a map of user IDs to their resources for quick lookup
-	userResources := make(map[string]*v2.Resource)
 	for _, user := range users {
 		userResource, err := parseIntoUserResource(user, nil)
 		if err != nil {
 			return nil, "", nil, err
 		}
-		userResources[*user.ID] = userResource
-	}
 
-	for _, user := range users {
-		userResource := userResources[*user.ID]
+		newGrant := grant.NewGrant(
+			resource,
+			"member",
+			userResource,
+		)
 
-		grant := &v2.Grant{
-			Id: fmt.Sprintf("grant:%s:%s", resource.Id.Resource, *user.ID),
-			Entitlement: &v2.Entitlement{
-				Id:          fmt.Sprintf("group:%s:membership", resource.Id.Resource),
-				DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-				Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-				GrantableTo: []*v2.ResourceType{userResourceType},
-				Slug:        "membership",
-				Resource:    resource,
-			},
-			Principal: userResource,
-		}
-
-		grants = append(grants, grant)
+		grants = append(grants, newGrant)
 	}
 
 	if len(users) == 0 {
@@ -119,21 +104,8 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 		zap.String("entitlement_id", entitlement.Id),
 	)
 
-	// The entitlement ID should be in the format: group:<groupID>:membership
-	parts := strings.Split(entitlement.Id, ":")
-	l.Info("Split entitlement ID parts", zap.Strings("parts", parts))
-	if len(parts) != 3 || parts[0] != "group" || parts[2] != "membership" {
-		l.Error("Invalid entitlement ID format")
-		return nil, nil, fmt.Errorf("invalid entitlement ID format: %s", entitlement.Id)
-	}
-
 	// Get the group ID from the entitlement ID
-	groupID := parts[1]
-	if groupID == "" {
-		l.Error("Group ID not found in entitlement ID")
-		return nil, nil, fmt.Errorf("group ID not found in entitlement ID")
-	}
-	l.Info("Extracted group ID", zap.String("group_id", groupID))
+	groupID := entitlement.Resource.Id.Resource
 
 	userID := resource.Id.Resource
 
@@ -150,26 +122,15 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 	l.Info("Successfully added user to group")
 
 	// Create and return the grant
-	grant := &v2.Grant{
-		Id: fmt.Sprintf("grant:%s:%s", groupID, userID),
-		Entitlement: &v2.Entitlement{
-			Id:          fmt.Sprintf("group:%s:membership", groupID),
-			DisplayName: fmt.Sprintf("Membership in %s", resource.DisplayName),
-			Description: fmt.Sprintf("Membership in the %s group", resource.DisplayName),
-			GrantableTo: []*v2.ResourceType{userResourceType},
-			Slug:        "membership",
-			Resource:    resource,
+	newGrant := grant.NewGrant(entitlement.Resource, "member", &v2.Resource{
+		Id: &v2.ResourceId{
+			ResourceType: userResourceType.Id,
+			Resource:     userID,
 		},
-		Principal: &v2.Resource{
-			Id: &v2.ResourceId{
-				ResourceType: userResourceType.Id,
-				Resource:     userID,
-			},
-		},
-	}
-	l.Info("Created grant", zap.String("grant_id", grant.Id))
+	})
+	l.Info("Created grant", zap.String("grant_id", newGrant.Id))
 
-	return []*v2.Grant{grant}, nil, nil
+	return []*v2.Grant{newGrant}, nil, nil
 }
 
 func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
@@ -179,20 +140,7 @@ func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 		zap.String("entitlement_id", grant.Entitlement.Id),
 	)
 
-	// Extract group ID from the entitlement ID
-	parts := strings.Split(grant.Entitlement.Id, ":")
-	if len(parts) != 3 || parts[0] != "group" || parts[2] != "membership" {
-		l.Error("Invalid entitlement ID format")
-		return nil, fmt.Errorf("invalid entitlement ID format: %s", grant.Entitlement.Id)
-	}
-
-	groupID := parts[1]
-	if groupID == "" {
-		l.Error("Group ID not found in entitlement ID")
-		return nil, fmt.Errorf("group ID not found in entitlement ID")
-	}
-	l.Info("Extracted group ID", zap.String("group_id", groupID))
-
+	groupID := grant.Entitlement.Resource.Id.Resource
 	userID := grant.Principal.Id.Resource
 
 	// Remove user from group
