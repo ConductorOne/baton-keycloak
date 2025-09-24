@@ -74,18 +74,11 @@ func (o *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		return nil, "", nil, err
 	}
 
-	// Create a map of user IDs to their resources for quick lookup
-	userResources := make(map[string]*v2.Resource)
 	for _, user := range users {
 		userResource, err := parseIntoUserResource(user, nil)
 		if err != nil {
 			return nil, "", nil, err
 		}
-		userResources[*user.ID] = userResource
-	}
-
-	for _, user := range users {
-		userResource := userResources[*user.ID]
 
 		newGrant := grant.NewGrant(
 			resource,
