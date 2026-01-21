@@ -37,7 +37,7 @@ func main() {
 func getConnector(ctx context.Context, v *cfg.Keycloak) (types.ConnectorServer, error) {
 	l := ctxzap.Extract(ctx)
 
-	cb, err := connector.New(ctx, v.KeycloakServerUrl, v.KeycloakRealm, v.KeycloakClientId, v.KeycloakClientSecret)
+	cb, err := connector.New(ctx, v.KeycloakServerUrl, v.KeycloakRealm, v.KeycloakClientId, v.KeycloakClientSecret, v.SyncSubGroups)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err

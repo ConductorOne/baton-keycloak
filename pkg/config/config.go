@@ -27,6 +27,11 @@ var (
 		field.WithRequired(true),
 		field.WithIsSecret(true),
 	)
+	syncSubGroupsField = field.BoolField(
+		"sync-sub-groups",
+		field.WithDescription("Enable syncing of subgroups. Requires Keycloak version 23 or higher."),
+		field.WithDefaultValue(false),
+	)
 )
 
 //go:generate go run ./gen
@@ -36,6 +41,7 @@ var Config = field.NewConfiguration(
 		keycloakRealmField,
 		keycloakClientIDField,
 		keycloakClientSecretField,
+		syncSubGroupsField,
 	},
 	field.WithConnectorDisplayName("Keycloak"),
 	field.WithHelpUrl("/docs/baton/keycloak"),
