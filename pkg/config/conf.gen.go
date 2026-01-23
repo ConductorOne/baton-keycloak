@@ -8,9 +8,10 @@ type Keycloak struct {
 	KeycloakRealm string `mapstructure:"keycloak-realm"`
 	KeycloakClientId string `mapstructure:"keycloak-client-id"`
 	KeycloakClientSecret string `mapstructure:"keycloak-client-secret"`
+	SyncSubGroups bool `mapstructure:"sync-sub-groups"`
 }
 
-func (c* Keycloak) findFieldByTag(tagValue string) (any, bool) {
+func (c *Keycloak) findFieldByTag(tagValue string) (any, bool) {
 	v := reflect.ValueOf(c).Elem() // Dereference pointer to struct
 	t := v.Type()
 
@@ -42,11 +43,13 @@ func (c *Keycloak) GetString(fieldName string) string {
 	if !ok {
 		return ""
 	}
-	t, ok := v.(string)
-	if !ok {
-		panic("wrong type")
+	if t, ok := v.(string); ok {
+		return t
 	}
-	return t
+	if t, ok := v.([]byte); ok {
+		return string(t)
+	}
+	panic("wrong type")
 }
 
 func (c *Keycloak) GetInt(fieldName string) int {

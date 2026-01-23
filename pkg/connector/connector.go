@@ -13,18 +13,19 @@ import (
 )
 
 type Connector struct {
-	client       *client.Client
-	serverURL    string
-	realm        string
-	clientID     string
-	clientSecret string
+	client        *client.Client
+	serverURL     string
+	realm         string
+	clientID      string
+	clientSecret  string
+	syncSubGroups bool
 }
 
 // ResourceSyncers returns ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	return []connectorbuilder.ResourceSyncer{
 		newUserBuilder(c.client),
-		newGroupBuilder(c.client),
+		newGroupBuilder(c.client, c.syncSubGroups),
 	}
 }
 
@@ -61,7 +62,7 @@ func (c *Connector) Close() error {
 }
 
 // Actually create a Keycloak connector.
-func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string) (*Connector, error) {
+func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string, syncSubGroups bool) (*Connector, error) {
 	l := ctxzap.Extract(ctx)
 	keycloakClient, err := client.NewClient(keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
 	if err != nil {
@@ -70,10 +71,11 @@ func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, ke
 	}
 
 	return &Connector{
-		client:       keycloakClient,
-		serverURL:    keycloakServerURL,
-		realm:        keycloakRealm,
-		clientID:     keycloakClientID,
-		clientSecret: keycloakClientSecret,
+		client:        keycloakClient,
+		serverURL:     keycloakServerURL,
+		realm:         keycloakRealm,
+		clientID:      keycloakClientID,
+		clientSecret:  keycloakClientSecret,
+		syncSubGroups: syncSubGroups,
 	}, nil
 }

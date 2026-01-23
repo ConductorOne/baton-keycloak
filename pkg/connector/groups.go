@@ -17,8 +17,9 @@ import (
 )
 
 type groupBuilder struct {
-	resourceType *v2.ResourceType
-	client       *client.Client
+	resourceType  *v2.ResourceType
+	client        *client.Client
+	syncSubGroups bool
 }
 
 func (o *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -29,17 +30,33 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 	var resources []*v2.Resource
 	annos := annotations.Annotations{}
 
+	// We only fetch at top level - sub-groups come embedded in the response when syncSubGroups is enabled
+	if parentResourceID != nil {
+		return resources, "", annos, nil
+	}
+
+	// Fetch top-level groups (includes full hierarchy with BriefRepresentation=false)
 	groups, nextToken, err := o.client.GetGroups(ctx, parseToken(pToken))
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	for _, group := range groups {
-		groupResource, err := parseIntoGroupResource(group, nil)
-		if err != nil {
-			return nil, "", nil, err
+		if o.syncSubGroups {
+			// Recursively flatten all groups (top-level and all sub-groups) into resources
+			groupResources, err := flattenGroupHierarchy(group, nil)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			resources = append(resources, groupResources...)
+		} else {
+			// Only sync top-level groups
+			groupResource, err := parseIntoGroupResource(group, nil)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			resources = append(resources, groupResource)
 		}
-		resources = append(resources, groupResource)
 	}
 
 	if len(groups) == 0 {
@@ -52,12 +69,18 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 func (o *groupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var entitlements []*v2.Entitlement
 
+	// Membership is grantable to both users and groups (for hierarchical group expansion)
+	grantableTo := []*v2.ResourceType{userResourceType}
+	if o.syncSubGroups {
+		grantableTo = append(grantableTo, groupResourceType)
+	}
+
 	membershipEntitlement := entitlement.NewAssignmentEntitlement(
 		resource,
 		"member",
 		entitlement.WithDisplayName(fmt.Sprintf("Membership in %s", resource.DisplayName)),
 		entitlement.WithDescription(fmt.Sprintf("Membership in the %s group", resource.DisplayName)),
-		entitlement.WithGrantableTo(userResourceType),
+		entitlement.WithGrantableTo(grantableTo...),
 	)
 
 	entitlements = append(entitlements, membershipEntitlement)
@@ -67,6 +90,35 @@ func (o *groupBuilder) Entitlements(ctx context.Context, resource *v2.Resource, 
 func (o *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	var grants []*v2.Grant
 	annos := annotations.Annotations{}
+	// On the first page only, emit a grant for hierarchical group membership.
+	// This grant represents "this subgroup is a member of its parent group".
+	// The GrantExpandable annotation enables expansion so that users who are members
+	// of this subgroup will also get membership in the parent group.
+	if (pToken == nil || pToken.Token == "") && o.syncSubGroups {
+		parentResourceID := resource.GetParentResourceId()
+		if parentResourceID != nil {
+			// Build this group's membership entitlement ID for the GrantExpandable annotation
+			// Format: group:{group_id}:member
+			thisGroupMemberEntitlementID := entitlement.NewEntitlementID(resource, "member")
+
+			// Create parent resource reference
+			parentResource := &v2.Resource{
+				Id: parentResourceID,
+			}
+
+			// Create grant: this subgroup is a member of its parent group
+			// With GrantExpandable: anyone who has thisGroup:member should also get parentGroup:member
+			parentMembershipGrant := grant.NewGrant(
+				parentResource,
+				"member",
+				resource, // This group is the principal (member of parent)
+				grant.WithAnnotation(&v2.GrantExpandable{
+					EntitlementIds: []string{thisGroupMemberEntitlementID},
+				}),
+			)
+			grants = append(grants, parentMembershipGrant)
+		}
+	}
 
 	// Get all users in this group directly
 	users, nextToken, err := o.client.GetGroupMembers(ctx, resource.Id.Resource, parseToken(pToken))
@@ -158,6 +210,36 @@ func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 	return nil, nil
 }
 
+// flattenGroupHierarchy recursively converts a group and all its sub-groups into resources.
+func flattenGroupHierarchy(group *gocloak.Group, parentResourceID *v2.ResourceId) ([]*v2.Resource, error) {
+	var resources []*v2.Resource
+
+	// Create resource for this group
+	groupResource, err := parseIntoGroupResource(group, parentResourceID)
+	if err != nil {
+		return nil, err
+	}
+	resources = append(resources, groupResource)
+
+	// Recursively process sub-groups
+	if group.SubGroups != nil && len(*group.SubGroups) > 0 {
+		thisGroupID := &v2.ResourceId{
+			ResourceType: groupResourceType.Id,
+			Resource:     *group.ID,
+		}
+		for _, subGroup := range *group.SubGroups {
+			subGroupCopy := subGroup
+			subResources, err := flattenGroupHierarchy(&subGroupCopy, thisGroupID)
+			if err != nil {
+				return nil, err
+			}
+			resources = append(resources, subResources...)
+		}
+	}
+
+	return resources, nil
+}
+
 func parseIntoGroupResource(group *gocloak.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"name": safeString(group.Name),
@@ -188,9 +270,10 @@ func parseIntoGroupResource(group *gocloak.Group, parentResourceID *v2.ResourceI
 	return ret, nil
 }
 
-func newGroupBuilder(client *client.Client) *groupBuilder {
+func newGroupBuilder(client *client.Client, syncSubGroups bool) *groupBuilder {
 	return &groupBuilder{
-		resourceType: groupResourceType,
-		client:       client,
+		resourceType:  groupResourceType,
+		client:        client,
+		syncSubGroups: syncSubGroups,
 	}
 }
