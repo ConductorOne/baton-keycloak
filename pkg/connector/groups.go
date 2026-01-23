@@ -156,6 +156,10 @@ func (o *groupBuilder) Grant(ctx context.Context, resource *v2.Resource, entitle
 		zap.String("entitlement_id", entitlement.Id),
 	)
 
+	if resource.Id.ResourceType != userResourceType.Id {
+		return nil, nil, fmt.Errorf("cannot grant entitlement on non-user resource")
+	}
+
 	// Get the group ID from the entitlement ID
 	groupID := entitlement.Resource.Id.Resource
 
@@ -191,6 +195,10 @@ func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 		zap.String("grant_id", grant.Id),
 		zap.String("entitlement_id", grant.Entitlement.Id),
 	)
+
+	if grant.Entitlement.Resource.Id.ResourceType != groupResourceType.Id {
+		return nil, fmt.Errorf("cannot revoke entitlement on non-group resource")
+	}
 
 	groupID := grant.Entitlement.Resource.Id.Resource
 	userID := grant.Principal.Id.Resource
