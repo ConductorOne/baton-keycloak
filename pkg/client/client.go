@@ -97,8 +97,9 @@ func (c *Client) GetGroups(ctx context.Context, first int) ([]*gocloak.Group, st
 	}
 
 	groups, err := c.client.GetGroups(ctx, token.AccessToken, c.realm, gocloak.GetGroupsParams{
-		First: pointer(first),
-		Max:   defaultMax,
+		First:               pointer(first),
+		Max:                 defaultMax,
+		BriefRepresentation: pointer(false), // Get full representation including sub-groups
 	})
 	if err != nil {
 		return nil, strconv.Itoa(first), fmt.Errorf("failed to get groups: %w", err)
