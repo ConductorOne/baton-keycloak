@@ -5,8 +5,10 @@ import (
 	"io"
 
 	"github.com/conductorone/baton-keycloak/pkg/client"
+	cfg "github.com/conductorone/baton-keycloak/pkg/config"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/cli"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -22,8 +24,8 @@ type Connector struct {
 }
 
 // ResourceSyncers returns ResourceSyncer for each resource type that should be synced from the upstream service.
-func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	return []connectorbuilder.ResourceSyncer{
+func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
+	return []connectorbuilder.ResourceSyncerV2{
 		newUserBuilder(c.client),
 		newGroupBuilder(c.client, c.syncSubGroups),
 	}
@@ -61,21 +63,25 @@ func (c *Connector) Close() error {
 	return nil
 }
 
-// Actually create a Keycloak connector.
-func New(ctx context.Context, keycloakServerURL string, keycloakRealm string, keycloakClientID string, keycloakClientSecret string, syncSubGroups bool) (*Connector, error) {
+func New(ctx context.Context, config *cfg.Keycloak, opts *cli.ConnectorOpts) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
 	l := ctxzap.Extract(ctx)
-	keycloakClient, err := client.NewClient(keycloakServerURL, keycloakRealm, keycloakClientID, keycloakClientSecret)
+	keycloakClient, err := client.NewClient(
+		config.KeycloakServerUrl,
+		config.KeycloakRealm,
+		config.KeycloakClientId,
+		config.KeycloakClientSecret,
+	)
 	if err != nil {
 		l.Error("error creating Keycloak client for some reason", zap.Error(err))
-		return nil, err
+		return nil, nil, err
 	}
 
 	return &Connector{
 		client:        keycloakClient,
-		serverURL:     keycloakServerURL,
-		realm:         keycloakRealm,
-		clientID:      keycloakClientID,
-		clientSecret:  keycloakClientSecret,
-		syncSubGroups: syncSubGroups,
-	}, nil
+		serverURL:     config.KeycloakServerUrl,
+		realm:         config.KeycloakRealm,
+		clientID:      config.KeycloakClientId,
+		clientSecret:  config.KeycloakClientSecret,
+		syncSubGroups: config.SyncSubGroups,
+	}, nil, nil
 }

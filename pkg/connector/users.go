@@ -7,8 +7,7 @@ import (
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
-	"github.com/conductorone/baton-sdk/pkg/types/resource"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
 // userBuilder implements the resource builder interface for Keycloak user resources.
@@ -35,19 +34,19 @@ func (o *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 //   - string: Next page token for pagination
 //   - annotations.Annotations: Additional metadata
 //   - error: Any error that occurred during the operation
-func (o *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (o *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, attrs rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	annos := annotations.Annotations{}
 
-	users, nextToken, err := o.client.GetUsers(ctx, parseToken(pToken))
+	users, nextToken, err := o.client.GetUsers(ctx, parseToken(&attrs.PageToken))
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	resource := make([]*v2.Resource, 0, len(users))
 	for _, user := range users {
 		userResource, err := parseIntoUserResource(user, nil)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 		resource = append(resource, userResource)
 	}
@@ -56,7 +55,7 @@ func (o *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		nextToken = ""
 	}
 
-	return resource, nextToken, annos, nil
+	return resource, &rs.SyncOpResults{NextPageToken: nextToken, Annotations: annos}, nil
 }
 
 // Entitlements returns entitlements for the user resource.
@@ -70,8 +69,8 @@ func (o *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 //   - string: Next page token for pagination
 //   - annotations.Annotations: Additional metadata
 //   - error: Any error that occurred during the operation
-func (o *userBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (o *userBuilder) Entitlements(ctx context.Context, resource *v2.Resource, attrs rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // Grants returns grants for the user resource.
@@ -85,8 +84,8 @@ func (o *userBuilder) Entitlements(ctx context.Context, resource *v2.Resource, _
 //   - string: Next page token for pagination
 //   - annotations.Annotations: Additional metadata
 //   - error: Any error that occurred during the operation
-func (o *userBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (o *userBuilder) Grants(ctx context.Context, resource *v2.Resource, attrs rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // newUserBuilder creates a new instance of userBuilder.
@@ -118,18 +117,18 @@ func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) 
 		"lastName":  safeString(user.LastName),
 	}
 
-	userTraits := []resource.UserTraitOption{
-		resource.WithUserProfile(profile),
-		resource.WithUserLogin(username),
-		resource.WithStatus(userStatus),
+	userTraits := []rs.UserTraitOption{
+		rs.WithUserProfile(profile),
+		rs.WithUserLogin(username),
+		rs.WithStatus(userStatus),
 	}
 
-	ret, err := resource.NewUserResource(
+	ret, err := rs.NewUserResource(
 		username,
 		userResourceType,
 		safeString(user.ID),
 		userTraits,
-		resource.WithParentResourceID(parentResourceID),
+		rs.WithParentResourceID(parentResourceID),
 	)
 	if err != nil {
 		return nil, err
