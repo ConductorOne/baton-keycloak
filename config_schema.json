@@ -99,6 +99,11 @@
           "isRequired": true
         }
       }
+    },
+    {
+      "name": "sync-sub-groups",
+      "description": "Enable syncing of sub-groups (nested groups). When enabled, the connector will sync the full group hierarchy.",
+      "boolField": {}
     }
   ],
   "displayName": "Keycloak",
