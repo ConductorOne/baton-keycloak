@@ -69,7 +69,12 @@ func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, stri
 		return nil, "", nil
 	}
 
-	return users, strconv.Itoa(first + *defaultMax), nil
+	nextToken := ""
+	if len(users) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(users))
+	}
+
+	return users, nextToken, nil
 }
 
 func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int) ([]*gocloak.User, string, error) {
@@ -87,7 +92,17 @@ func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int)
 		return nil, "", fmt.Errorf("failed to get group members: %w", err)
 	}
 
-	return members, strconv.Itoa(first + len(members)), nil
+	if len(members) == 0 {
+		return nil, "", nil
+	}
+
+	// If we got fewer items than requested, we've reached the last page
+	nextToken := ""
+	if len(members) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(members))
+	}
+
+	return members, nextToken, nil
 }
 
 func (c *Client) GetGroups(ctx context.Context, first int) ([]*gocloak.Group, string, error) {
@@ -109,7 +124,13 @@ func (c *Client) GetGroups(ctx context.Context, first int) ([]*gocloak.Group, st
 		return nil, "", nil
 	}
 
-	return groups, strconv.Itoa(first + len(groups)), nil
+	// If we got fewer items than requested, we've reached the last page
+	nextToken := ""
+	if len(groups) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(groups))
+	}
+
+	return groups, nextToken, nil
 }
 
 func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.Group, error) {
