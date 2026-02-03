@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -13,12 +12,14 @@ import (
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 type groupBuilder struct {
-	resourceType  *v2.ResourceType
-	client        *client.Client
-	syncSubGroups bool
+	resourceType    *v2.ResourceType
+	client          *client.Client
+	syncSubGroups   bool
+	keycloakVersion int
 }
 
 func (o *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -29,12 +30,33 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 	var resources []*v2.Resource
 	annos := annotations.Annotations{}
 
-	// We only fetch at top level - sub-groups come embedded in the response when syncSubGroups is enabled
+	// If we have a parent, we're fetching sub-groups
 	if parentResourceID != nil {
-		return resources, &rs.SyncOpResults{Annotations: annos}, nil
+		if o.keycloakVersion >= 23 {
+			// Keycloak 23+ supports the /children endpoint
+			groups, nextToken, err := o.client.GetGroupChildren(ctx, parentResourceID.Resource, parseToken(&attrs.PageToken))
+			if err != nil {
+				return nil, nil, err
+			}
+
+			for _, group := range groups {
+				groupResource, err := o.parseIntoGroupResource(group, parentResourceID)
+				if err != nil {
+					return nil, nil, err
+				}
+				resources = append(resources, groupResource)
+			}
+
+			return resources, &rs.SyncOpResults{NextPageToken: nextToken, Annotations: annos}, nil
+		} else {
+			// Keycloak < 23: sub-groups are embedded in parent group response
+			// This case should not happen in List() since we flatten at top level
+			// But return empty for safety
+			return resources, &rs.SyncOpResults{Annotations: annos}, nil
+		}
 	}
 
-	// Fetch top-level groups (includes full hierarchy with BriefRepresentation=false)
+	// Fetch top-level groups
 	groups, nextToken, err := o.client.GetGroups(ctx, parseToken(&attrs.PageToken))
 	if err != nil {
 		return nil, nil, err
@@ -42,15 +64,26 @@ func (o *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 
 	for _, group := range groups {
 		if o.syncSubGroups {
-			// Recursively flatten all groups (top-level and all sub-groups) into resources
-			groupResources, err := flattenGroupHierarchy(group, nil)
-			if err != nil {
-				return nil, nil, err
+			if o.keycloakVersion >= 23 {
+				// Keycloak 23+: Create resource with ChildResourceType annotation if it has children
+				// The SDK will call List() again with parentResourceID to fetch children
+				groupResource, err := o.parseIntoGroupResource(group, nil)
+				if err != nil {
+					return nil, nil, err
+				}
+				resources = append(resources, groupResource)
+			} else {
+				// Keycloak < 23: sub-groups come embedded in the response
+				// Recursively flatten all groups (top-level and all sub-groups) into resources
+				groupResources, err := o.flattenGroupHierarchy(group, nil)
+				if err != nil {
+					return nil, nil, err
+				}
+				resources = append(resources, groupResources...)
 			}
-			resources = append(resources, groupResources...)
 		} else {
 			// Only sync top-level groups
-			groupResource, err := parseIntoGroupResource(group, nil)
+			groupResource, err := o.parseIntoGroupResource(group, nil)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -218,11 +251,12 @@ func (o *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 }
 
 // flattenGroupHierarchy recursively converts a group and all its sub-groups into resources.
-func flattenGroupHierarchy(group *gocloak.Group, parentResourceID *v2.ResourceId) ([]*v2.Resource, error) {
+func (o *groupBuilder) flattenGroupHierarchy(group *client.Group, parentResourceID *v2.ResourceId) ([]*v2.Resource, error) {
 	var resources []*v2.Resource
 
 	// Create resource for this group
-	groupResource, err := parseIntoGroupResource(group, parentResourceID)
+	// Note: syncSubGroups is always true when flattenGroupHierarchy is called
+	groupResource, err := o.parseIntoGroupResource(group, parentResourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +270,7 @@ func flattenGroupHierarchy(group *gocloak.Group, parentResourceID *v2.ResourceId
 		}
 		for _, subGroup := range *group.SubGroups {
 			subGroupCopy := subGroup
-			subResources, err := flattenGroupHierarchy(&subGroupCopy, thisGroupID)
+			subResources, err := o.flattenGroupHierarchy(&subGroupCopy, thisGroupID)
 			if err != nil {
 				return nil, err
 			}
@@ -247,7 +281,7 @@ func flattenGroupHierarchy(group *gocloak.Group, parentResourceID *v2.ResourceId
 	return resources, nil
 }
 
-func parseIntoGroupResource(group *gocloak.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+func (o *groupBuilder) parseIntoGroupResource(group *client.Group, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"name": safeString(group.Name),
 		"path": safeString(group.Path),
@@ -263,13 +297,23 @@ func parseIntoGroupResource(group *gocloak.Group, parentResourceID *v2.ResourceI
 		rs.WithGroupProfile(profile),
 	}
 
+	var annotations []proto.Message
+	// Add ChildResourceType annotation if syncSubGroups is enabled and the group has children
+	if o.syncSubGroups && group.SubGroupsCount != nil && *group.SubGroupsCount > 0 {
+		annotations = append(annotations, &v2.ChildResourceType{
+			ResourceTypeId: groupResourceType.Id,
+		})
+	}
+
 	ret, err := rs.NewGroupResource(
 		safeString(group.Name),
 		groupResourceType,
 		*group.ID,
 		groupTraits,
 		rs.WithParentResourceID(parentResourceID),
+		rs.WithAnnotation(annotations...),
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -277,10 +321,11 @@ func parseIntoGroupResource(group *gocloak.Group, parentResourceID *v2.ResourceI
 	return ret, nil
 }
 
-func newGroupBuilder(client *client.Client, syncSubGroups bool) *groupBuilder {
+func newGroupBuilder(client *client.Client, syncSubGroups bool, keycloakVersion int) *groupBuilder {
 	return &groupBuilder{
-		resourceType:  groupResourceType,
-		client:        client,
-		syncSubGroups: syncSubGroups,
+		resourceType:    groupResourceType,
+		client:          client,
+		syncSubGroups:   syncSubGroups,
+		keycloakVersion: keycloakVersion,
 	}
 }
