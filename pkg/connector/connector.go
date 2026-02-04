@@ -80,10 +80,10 @@ func New(ctx context.Context, config *cfg.Keycloak, opts *cli.ConnectorOpts) (co
 	// Check Keycloak version once during initialization
 	version, err := keycloakClient.GetKeycloakVersion(ctx)
 	if err != nil {
-		l.Warn("failed to get Keycloak version, defaulting to legacy behavior", zap.Error(err))
+		l.Debug("failed to get Keycloak version, defaulting to legacy behavior", zap.Error(err))
 		version = 0 // Default to 0 (will use legacy behavior)
 	} else {
-		l.Info("detected Keycloak version", zap.Int("major_version", version))
+		l.Debug("detected Keycloak version", zap.Int("major_version", version))
 	}
 
 	return &Connector{
