@@ -15,19 +15,20 @@ import (
 )
 
 type Connector struct {
-	client        *client.Client
-	serverURL     string
-	realm         string
-	clientID      string
-	clientSecret  string
-	syncSubGroups bool
+	client          *client.Client
+	serverURL       string
+	realm           string
+	clientID        string
+	clientSecret    string
+	syncSubGroups   bool
+	keycloakVersion int
 }
 
 // ResourceSyncers returns ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
 	return []connectorbuilder.ResourceSyncerV2{
 		newUserBuilder(c.client),
-		newGroupBuilder(c.client, c.syncSubGroups),
+		newGroupBuilder(c.client, c.syncSubGroups, c.keycloakVersion),
 	}
 }
 
@@ -76,12 +77,22 @@ func New(ctx context.Context, config *cfg.Keycloak, opts *cli.ConnectorOpts) (co
 		return nil, nil, err
 	}
 
+	// Check Keycloak version once during initialization
+	version, err := keycloakClient.GetKeycloakVersion(ctx)
+	if err != nil {
+		l.Debug("failed to get Keycloak version, defaulting to legacy behavior", zap.Error(err))
+		version = 0 // Default to 0 (will use legacy behavior)
+	} else {
+		l.Debug("detected Keycloak version", zap.Int("major_version", version))
+	}
+
 	return &Connector{
-		client:        keycloakClient,
-		serverURL:     config.KeycloakServerUrl,
-		realm:         config.KeycloakRealm,
-		clientID:      config.KeycloakClientId,
-		clientSecret:  config.KeycloakClientSecret,
-		syncSubGroups: config.SyncSubGroups,
+		client:          keycloakClient,
+		serverURL:       config.KeycloakServerUrl,
+		realm:           config.KeycloakRealm,
+		clientID:        config.KeycloakClientId,
+		clientSecret:    config.KeycloakClientSecret,
+		syncSubGroups:   config.SyncSubGroups,
+		keycloakVersion: version,
 	}, nil, nil
 }

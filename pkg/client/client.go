@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/Clarilab/gocloaksession"
 	"github.com/Nerzal/gocloak/v13"
@@ -15,6 +17,7 @@ type Client struct {
 	clientID     string
 	clientSecret string
 	session      gocloaksession.GoCloakSession
+	serverURL    string
 }
 
 var defaultMax = pointer(100)
@@ -31,6 +34,7 @@ func NewClient(serverURL, realm, clientID, clientSecret string) (*Client, error)
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		session:      session,
+		serverURL:    serverURL,
 	}, nil
 }
 
@@ -105,32 +109,48 @@ func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int)
 	return members, nextToken, nil
 }
 
-func (c *Client) GetGroups(ctx context.Context, first int) ([]*gocloak.Group, string, error) {
+func (c *Client) GetGroups(ctx context.Context, first int) ([]*Group, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
 		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
 	}
 
-	groups, err := c.client.GetGroups(ctx, token.AccessToken, c.realm, gocloak.GetGroupsParams{
-		First:               pointer(first),
-		Max:                 defaultMax,
-		BriefRepresentation: pointer(false), // Get full representation including sub-groups
-	})
+	u, err := url.Parse(c.serverURL)
+	if err != nil {
+		return nil, strconv.Itoa(first), err
+	}
+	u = u.JoinPath("admin", "realms", c.realm, "groups")
+
+	var result []*Group
+	resp, err := c.client.GetRequestWithBearerAuth(ctx, token.AccessToken).
+		SetResult(&result).
+		SetQueryParams(map[string]string{
+			"first":               strconv.Itoa(first),
+			"max":                 strconv.Itoa(*defaultMax),
+			"subGroupsCount":      "true",
+			"briefRepresentation": "false",
+		}).
+		Get(u.String())
+
 	if err != nil {
 		return nil, strconv.Itoa(first), fmt.Errorf("failed to get groups: %w", err)
 	}
 
-	if len(groups) == 0 {
+	if resp.IsError() {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get groups: status %s", resp.Status())
+	}
+
+	if len(result) == 0 {
 		return nil, "", nil
 	}
 
 	// If we got fewer items than requested, we've reached the last page
 	nextToken := ""
-	if len(groups) >= *defaultMax {
-		nextToken = strconv.Itoa(first + len(groups))
+	if len(result) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(result))
 	}
 
-	return groups, nextToken, nil
+	return result, nextToken, nil
 }
 
 func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.Group, error) {
@@ -140,6 +160,85 @@ func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.G
 	}
 
 	return c.client.GetUserGroups(ctx, token.AccessToken, c.realm, userID, gocloak.GetGroupsParams{})
+}
+
+func (c *Client) GetGroupChildren(ctx context.Context, groupID string, first int) ([]*Group, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
+	}
+
+	u, err := url.Parse(c.serverURL)
+	if err != nil {
+		return nil, strconv.Itoa(first), err
+	}
+	u = u.JoinPath("admin", "realms", c.realm, "groups", groupID, "children")
+
+	var result []*Group
+	resp, err := c.client.GetRequestWithBearerAuth(ctx, token.AccessToken).
+		SetResult(&result).
+		SetQueryParams(map[string]string{
+			"first":               strconv.Itoa(first),
+			"max":                 strconv.Itoa(*defaultMax),
+			"briefRepresentation": "false",
+		}).
+		Get(u.String())
+
+	if err != nil {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get group children: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, strconv.Itoa(first), fmt.Errorf("failed to get group children: status %s", resp.Status())
+	}
+
+	if len(result) == 0 {
+		return nil, "", nil
+	}
+
+	// If we got fewer items than requested, we've reached the last page
+	nextToken := ""
+	if len(result) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(result))
+	}
+
+	return result, nextToken, nil
+}
+
+func (c *Client) GetKeycloakVersion(ctx context.Context) (int, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	serverInfo, err := c.client.GetServerInfo(ctx, token.AccessToken)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get server info: %w", err)
+	}
+
+	if serverInfo.SystemInfo == nil || serverInfo.SystemInfo.Version == nil {
+		return 0, fmt.Errorf("server version not available")
+	}
+
+	version := *serverInfo.SystemInfo.Version
+	// Parse version string like "23.0.1" or "24.0.0-SNAPSHOT" to get major version
+	majorVersion, err := parseMajorVersion(version)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse version '%s': %w", version, err)
+	}
+
+	return majorVersion, nil
+}
+
+// parseMajorVersion extracts the major version number from a version string.
+func parseMajorVersion(version string) (int, error) {
+	parts := strings.Split(version, ".")
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("invalid version format")
+	}
+	// Handle versions like "23" or "23.0.1" or "24.0.0-SNAPSHOT"
+	majorStr := strings.Split(parts[0], "-")[0]
+	return strconv.Atoi(majorStr)
 }
 
 func (c *Client) Close() error {
