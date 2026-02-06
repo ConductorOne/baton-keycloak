@@ -5,11 +5,12 @@ go 1.25.2
 require (
 	github.com/Clarilab/gocloaksession v1.14.0
 	github.com/Nerzal/gocloak/v13 v13.9.0
-	github.com/conductorone/baton-sdk v0.7.14
+	github.com/conductorone/baton-sdk v0.7.16
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	go.uber.org/zap v1.27.1
+	google.golang.org/protobuf v1.36.10
 )
 
 require (
@@ -115,7 +116,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.63.0 // indirect
