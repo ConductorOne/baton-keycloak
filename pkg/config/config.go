@@ -35,6 +35,7 @@ var (
 	BaseURLField = field.StringField(
 		"base-url",
 		field.WithDescription("Override the Keycloak API URL (for testing)"),
+		field.WithHidden(true),
 	)
 )
 
