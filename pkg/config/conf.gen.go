@@ -9,6 +9,7 @@ type Keycloak struct {
 	KeycloakClientId string `mapstructure:"keycloak-client-id"`
 	KeycloakClientSecret string `mapstructure:"keycloak-client-secret"`
 	SyncSubGroups bool `mapstructure:"sync-sub-groups"`
+	BaseUrl string `mapstructure:"base-url"`
 }
 
 func (c *Keycloak) findFieldByTag(tagValue string) (any, bool) {

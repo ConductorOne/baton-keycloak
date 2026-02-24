@@ -32,6 +32,12 @@ var (
 		field.WithDescription("Enable syncing of sub-groups (nested groups). When enabled, the connector will sync the full group hierarchy."),
 		field.WithDefaultValue(false),
 	)
+	BaseURLField = field.StringField(
+		"base-url",
+		field.WithDescription("Override the Keycloak API URL (for testing)"),
+		field.WithHidden(true),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
+	)
 )
 
 //go:generate go run ./gen
@@ -42,6 +48,7 @@ var Config = field.NewConfiguration(
 		keycloakClientIDField,
 		keycloakClientSecretField,
 		syncSubGroupsField,
+		BaseURLField,
 	},
 	field.WithConnectorDisplayName("Keycloak"),
 	field.WithHelpUrl("/docs/baton/keycloak"),

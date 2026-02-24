@@ -66,8 +66,15 @@ func (c *Connector) Close() error {
 
 func New(ctx context.Context, config *cfg.Keycloak, opts *cli.ConnectorOpts) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error) {
 	l := ctxzap.Extract(ctx)
+
+	// Use base-url override if provided, otherwise use keycloak-server-url
+	serverURL := config.KeycloakServerUrl
+	if config.BaseUrl != "" {
+		serverURL = config.BaseUrl
+	}
+
 	keycloakClient, err := client.NewClient(
-		config.KeycloakServerUrl,
+		serverURL,
 		config.KeycloakRealm,
 		config.KeycloakClientId,
 		config.KeycloakClientSecret,
@@ -88,7 +95,7 @@ func New(ctx context.Context, config *cfg.Keycloak, opts *cli.ConnectorOpts) (co
 
 	return &Connector{
 		client:          keycloakClient,
-		serverURL:       config.KeycloakServerUrl,
+		serverURL:       serverURL,
 		realm:           config.KeycloakRealm,
 		clientID:        config.KeycloakClientId,
 		clientSecret:    config.KeycloakClientSecret,
