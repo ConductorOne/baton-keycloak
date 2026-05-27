@@ -233,7 +233,7 @@ spec:
     spec:
       containers:
       - name: baton-keycloak
-        image: ghcr.io/conductorone/baton-keycloak:latest
+        image: public.ecr.aws/conductorone/baton-keycloak:latest
         imagePullPolicy: IfNotPresent
         env:
         - name: BATON_HOST_ID
@@ -257,7 +257,3 @@ Check that the connector data uploaded correctly. In C1, click **Apps**. On the 
 **That's it!** Your Keycloak connector is now pulling access data into C1.
 </Tab>
 </Tabs>
-
-
-
-
