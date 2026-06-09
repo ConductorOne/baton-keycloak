@@ -2,12 +2,20 @@ package connector
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"math/big"
+	"net/http"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 // userBuilder implements the resource builder interface for Keycloak user resources.
@@ -97,6 +105,159 @@ func newUserBuilder(client *client.Client) *userBuilder {
 	}
 }
 
+var _ connectorbuilder.AccountManagerV2 = (*userBuilder)(nil)
+
+func (o *userBuilder) CreateAccount(
+	ctx context.Context,
+	accountInfo *v2.AccountInfo,
+	credentialOptions *v2.LocalCredentialOptions,
+) (connectorbuilder.CreateAccountResponse, []*v2.PlaintextData, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	login := accountInfo.GetLogin()
+	if login == "" {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: login is required for account creation")
+	}
+
+	var email string
+	for _, e := range accountInfo.GetEmails() {
+		if e.GetIsPrimary() {
+			email = e.GetAddress()
+			break
+		}
+	}
+	if email == "" && len(accountInfo.GetEmails()) > 0 {
+		email = accountInfo.GetEmails()[0].GetAddress()
+	}
+
+	var firstName, lastName string
+	if profile := accountInfo.GetProfile(); profile != nil {
+		if v, ok := profile.GetFields()["first_name"]; ok {
+			firstName = v.GetStringValue()
+		}
+		if v, ok := profile.GetFields()["last_name"]; ok {
+			lastName = v.GetStringValue()
+		}
+	}
+
+	user := gocloak.User{
+		Username:      &login,
+		Enabled:       pointer(true),
+		EmailVerified: pointer(true),
+	}
+	if email != "" {
+		user.Email = &email
+	}
+	if firstName != "" {
+		user.FirstName = &firstName
+	}
+	if lastName != "" {
+		user.LastName = &lastName
+	}
+
+	var plaintextData []*v2.PlaintextData
+	if credentialOptions != nil {
+		if pw := credentialOptions.GetPlaintextPassword(); pw != nil {
+			password := pw.GetPlaintextPassword()
+			user.Credentials = &[]gocloak.CredentialRepresentation{{
+				Type:      pointer("password"),
+				Value:     &password,
+				Temporary: pointer(credentialOptions.GetForceChangeAtNextLogin()),
+			}}
+			plaintextData = append(plaintextData, v2.PlaintextData_builder{
+				Name:  "password",
+				Bytes: []byte(password),
+			}.Build())
+		} else if rp := credentialOptions.GetRandomPassword(); rp != nil {
+			length := rp.GetLength()
+			if length <= 0 {
+				length = 24
+			}
+			password, err := generateRandomPassword(int(length))
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("baton-keycloak: failed to generate random password: %w", err)
+			}
+			user.Credentials = &[]gocloak.CredentialRepresentation{{
+				Type:      pointer("password"),
+				Value:     &password,
+				Temporary: pointer(credentialOptions.GetForceChangeAtNextLogin()),
+			}}
+			plaintextData = append(plaintextData, v2.PlaintextData_builder{
+				Name:  "password",
+				Bytes: []byte(password),
+			}.Build())
+		}
+	}
+
+	l.Info("Creating user in Keycloak", zap.String("username", login))
+
+	userID, err := o.client.CreateUser(ctx, user)
+	if err != nil {
+		var apiErr *gocloak.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == http.StatusConflict {
+			l.Info("User already exists in Keycloak", zap.String("username", login))
+			existingUsers, lookupErr := o.client.GetUsersByUsername(ctx, login)
+			if lookupErr != nil || len(existingUsers) == 0 {
+				return nil, nil, nil, fmt.Errorf("baton-keycloak: user already exists but could not be retrieved: %w", err)
+			}
+			resource, parseErr := parseIntoUserResource(existingUsers[0], nil)
+			if parseErr != nil {
+				return nil, nil, nil, fmt.Errorf("baton-keycloak: failed to parse existing user: %w", parseErr)
+			}
+			return v2.CreateAccountResponse_AlreadyExistsResult_builder{
+				Resource:              resource,
+				IsCreateAccountResult: true,
+			}.Build(), nil, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: failed to create user: %w", err)
+	}
+
+	l.Info("Successfully created user in Keycloak", zap.String("user_id", userID), zap.String("username", login))
+
+	createdUser := &gocloak.User{
+		ID:            &userID,
+		Username:      &login,
+		Email:         user.Email,
+		FirstName:     user.FirstName,
+		LastName:      user.LastName,
+		Enabled:       pointer(true),
+		EmailVerified: pointer(true),
+	}
+
+	resource, err := parseIntoUserResource(createdUser, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: failed to parse created user resource: %w", err)
+	}
+
+	return v2.CreateAccountResponse_SuccessResult_builder{
+		Resource:              resource,
+		IsCreateAccountResult: true,
+	}.Build(), plaintextData, nil, nil
+}
+
+func (o *userBuilder) CreateAccountCapabilityDetails(ctx context.Context) (*v2.CredentialDetailsAccountProvisioning, annotations.Annotations, error) {
+	return v2.CredentialDetailsAccountProvisioning_builder{
+		SupportedCredentialOptions: []v2.CapabilityDetailCredentialOption{
+			v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD,
+			v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD,
+		},
+		PreferredCredentialOption: v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD,
+	}.Build(), nil, nil
+}
+
+func generateRandomPassword(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	result := make([]byte, length)
+	for i := range result {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = charset[idx.Int64()]
+	}
+	return string(result), nil
+}
+
 // parseIntoUserResource converts a Linode user object into a Baton SDK user resource.
 // Parameters:
 //   - ctx: Context (currently unused)
@@ -142,4 +303,8 @@ func safeString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func pointer[T any](v T) *T {
+	return &v
 }

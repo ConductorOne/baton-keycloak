@@ -241,6 +241,39 @@ func parseMajorVersion(version string) (int, error) {
 	return strconv.Atoi(majorStr)
 }
 
+func (c *Client) CreateUser(ctx context.Context, user gocloak.User) (string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	userID, err := c.client.CreateUser(ctx, token.AccessToken, c.realm, user)
+	if err != nil {
+		return "", err
+	}
+
+	return userID, nil
+}
+
+func (c *Client) GetUsersByUsername(ctx context.Context, username string) ([]*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	exact := true
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
+		Username: &username,
+		Exact:    &exact,
+		Max:      pointer(1),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get users by username: %w", err)
+	}
+
+	return users, nil
+}
+
 func (c *Client) Close() error {
 	return nil
 }
