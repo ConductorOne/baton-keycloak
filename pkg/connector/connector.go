@@ -43,6 +43,50 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 	return &v2.ConnectorMetadata{
 		DisplayName: "baton-keycloak",
 		Description: "Connector syncing users and groups from Keycloak",
+		AccountCreationSchema: &v2.ConnectorAccountCreationSchema{
+			FieldMap: map[string]*v2.ConnectorAccountCreationSchema_Field{
+				"username": {
+					DisplayName: "Username",
+					Required:    true,
+					Description: "Username for the new Keycloak user.",
+					Field: &v2.ConnectorAccountCreationSchema_Field_StringField{
+						StringField: &v2.ConnectorAccountCreationSchema_StringField{},
+					},
+					Placeholder: "john.doe",
+					Order:       1,
+				},
+				"email": {
+					DisplayName: "Email",
+					Required:    true,
+					Description: "Email address for the new user.",
+					Field: &v2.ConnectorAccountCreationSchema_Field_StringField{
+						StringField: &v2.ConnectorAccountCreationSchema_StringField{},
+					},
+					Placeholder: "john.doe@example.com",
+					Order:       2,
+				},
+				"firstName": {
+					DisplayName: "First Name",
+					Required:    false,
+					Description: "Given name (first name) of the user.",
+					Field: &v2.ConnectorAccountCreationSchema_Field_StringField{
+						StringField: &v2.ConnectorAccountCreationSchema_StringField{},
+					},
+					Placeholder: "John",
+					Order:       3,
+				},
+				"lastName": {
+					DisplayName: "Last Name",
+					Required:    false,
+					Description: "Family name (last name) of the user.",
+					Field: &v2.ConnectorAccountCreationSchema_Field_StringField{
+						StringField: &v2.ConnectorAccountCreationSchema_StringField{},
+					},
+					Placeholder: "Doe",
+					Order:       4,
+				},
+			},
+		},
 	}, nil
 }
 

@@ -2,13 +2,19 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-keycloak/pkg/client"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
+
+// requiredActionUpdatePassword is a required action that forces a NO_PASSWORD user to set their own credential at first login.
+const requiredActionUpdatePassword = "UPDATE_PASSWORD"
 
 // userBuilder implements the resource builder interface for Keycloak user resources.
 // It handles the creation and synchronization of user resources between Keycloak and Baton.
@@ -88,6 +94,159 @@ func (o *userBuilder) Grants(ctx context.Context, resource *v2.Resource, attrs r
 	return nil, nil, nil
 }
 
+// CreateAccountCapabilityDetails declares which credential options the connector
+// supports when provisioning a Keycloak account. RANDOM_PASSWORD is preferred:
+// Keycloak admin-created users can have a non-temporary password set immediately.
+func (o *userBuilder) CreateAccountCapabilityDetails(ctx context.Context) (*v2.CredentialDetailsAccountProvisioning, annotations.Annotations, error) {
+	return &v2.CredentialDetailsAccountProvisioning{
+		SupportedCredentialOptions: []v2.CapabilityDetailCredentialOption{
+			v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD,
+			v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD,
+		},
+		PreferredCredentialOption: v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD,
+	}, nil, nil
+}
+
+// CreateAccount provisions a new user in the Keycloak realm. The credential is
+// set inline on the create call (atomic, single request): RANDOM_PASSWORD sets a
+// non-temporary password returned via PlaintextData, NO_PASSWORD creates the user
+// with a one-time UPDATE_PASSWORD required action. After creating, the user is
+// read back to build the resource. A duplicate username/email (409) is treated as
+// success via AlreadyExistsResult.
+func (o *userBuilder) CreateAccount(
+	ctx context.Context,
+	accountInfo *v2.AccountInfo,
+	credentialOptions *v2.LocalCredentialOptions,
+) (
+	connectorbuilder.CreateAccountResponse,
+	[]*v2.PlaintextData,
+	annotations.Annotations,
+	error,
+) {
+	if credentialOptions == nil {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account: missing credential options")
+	}
+
+	profileMap := accountInfo.GetProfile().AsMap()
+
+	username := extractUsername(accountInfo, profileMap)
+	if username == "" {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account: username is required")
+	}
+
+	email, _ := profileMap["email"].(string)
+	if email == "" {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: email is required", username)
+	}
+
+	firstName, _ := profileMap["firstName"].(string)
+	lastName, _ := profileMap["lastName"].(string)
+
+	newUser := gocloak.User{
+		Username:  gocloak.StringP(username),
+		Enabled:   gocloak.BoolP(true),
+		Email:     stringPOrNil(email),
+		FirstName: stringPOrNil(firstName),
+		LastName:  stringPOrNil(lastName),
+	}
+
+	// Build the credential inline so create + password are a single atomic call.
+	// NO_PASSWORD instead attaches a one-time UPDATE_PASSWORD action.
+	var ptds []*v2.PlaintextData
+	if credentialOptions.GetNoPassword() != nil {
+		newUser.RequiredActions = &[]string{requiredActionUpdatePassword}
+	} else {
+		password, err := crypto.GeneratePassword(ctx, credentialOptions)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: failed to generate password: %w", username, err)
+		}
+		newUser.Credentials = &[]gocloak.CredentialRepresentation{
+			{
+				Type:      gocloak.StringP("password"),
+				Value:     gocloak.StringP(password),
+				Temporary: gocloak.BoolP(false),
+			},
+		}
+		ptds = []*v2.PlaintextData{
+			{
+				Name:  "password",
+				Bytes: []byte(password),
+			},
+		}
+	}
+
+	userID, err := o.client.CreateUser(ctx, newUser)
+	alreadyExists := err != nil && client.IsAlreadyExistsError(err)
+	if err != nil && !alreadyExists {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: %w", username, err)
+	}
+
+	// Read the user back to build the resource. A fresh create returns only the
+	// ID, so fetch by ID. A 409 conflict returns no ID, so look the pre-existing
+	// user up by username (then email).
+	var user *gocloak.User
+	if userID != "" {
+		user, err = o.client.GetUserByID(ctx, userID)
+	} else {
+		user, err = o.resolveExistingUser(ctx, username, email)
+	}
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: %w", username, err)
+	}
+
+	ur, err := parseIntoUserResource(user, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: %w", username, err)
+	}
+
+	if alreadyExists {
+		return &v2.CreateAccountResponse_AlreadyExistsResult{Resource: ur}, nil, nil, nil
+	}
+
+	return &v2.CreateAccountResponse_SuccessResult{Resource: ur}, ptds, nil, nil
+}
+
+// resolveExistingUser looks up a user for the read-back when CreateUser did not
+// return an ID (the user already existed). It matches by exact username first,
+// then falls back to email since a 409 can be triggered by either.
+func (o *userBuilder) resolveExistingUser(ctx context.Context, username, email string) (*gocloak.User, error) {
+	user, err := o.client.GetUserByUsername(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil && email != "" {
+		user, err = o.client.GetUserByEmail(ctx, email)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user %q not found after create conflict", username)
+	}
+	return user, nil
+}
+
+// extractUsername resolves the Keycloak username from the account login first,
+// then the profile map. Keycloak requires a username on every user.
+func extractUsername(accountInfo *v2.AccountInfo, profileMap map[string]any) string {
+	if login := accountInfo.GetLogin(); login != "" {
+		return login
+	}
+	if username, ok := profileMap["username"].(string); ok {
+		return username
+	}
+	return ""
+}
+
+// stringPOrNil returns a pointer to s, or nil when s is empty, so optional
+// gocloak.User fields are omitted rather than sent as empty strings.
+func stringPOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // newUserBuilder creates a new instance of userBuilder.
 // This is the constructor function for the userBuilder struct.
 func newUserBuilder(client *client.Client) *userBuilder {
@@ -97,10 +256,9 @@ func newUserBuilder(client *client.Client) *userBuilder {
 	}
 }
 
-// parseIntoUserResource converts a Linode user object into a Baton SDK user resource.
+// parseIntoUserResource converts a Keycloak user object into a Baton SDK user resource.
 // Parameters:
-//   - ctx: Context (currently unused)
-//   - user: Pointer to the Linode user object to convert
+//   - user: Pointer to the Keycloak user object to convert
 //   - parentResourceID: Optional parent resource ID for hierarchy
 //
 // Returns:
@@ -109,10 +267,11 @@ func newUserBuilder(client *client.Client) *userBuilder {
 func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	var userStatus = v2.UserTrait_Status_STATUS_ENABLED
 	username := safeString(user.Username)
+	email := safeString(user.Email)
 
 	profile := map[string]interface{}{
 		"username":  username,
-		"email":     safeString(user.Email),
+		"email":     email,
 		"firstName": safeString(user.FirstName),
 		"lastName":  safeString(user.LastName),
 	}
@@ -120,6 +279,7 @@ func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) 
 	userTraits := []rs.UserTraitOption{
 		rs.WithUserProfile(profile),
 		rs.WithUserLogin(username),
+		rs.WithEmail(email, true),
 		rs.WithStatus(userStatus),
 	}
 

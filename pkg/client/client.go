@@ -56,6 +56,85 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, userID, groupID string
 	return c.client.DeleteUserFromGroup(ctx, token.AccessToken, c.realm, userID, groupID)
 }
 
+// CreateUser creates a user in the realm via POST /admin/realms/{realm}/users and returns the new user's ID.
+func (c *Client) CreateUser(ctx context.Context, user gocloak.User) (string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	userID, err := c.client.CreateUser(ctx, token.AccessToken, c.realm, user)
+	if err != nil {
+		return "", fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return userID, nil
+}
+
+// GetUserByID fetches a single user by ID via GET /admin/realms/{realm}/users/{id}.
+func (c *Client) GetUserByID(ctx context.Context, userID string) (*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by id: %w", err)
+	}
+
+	return user, nil
+}
+
+// GetUserByUsername returns the user matching username exactly, or nil when none exists.
+// Used by CreateAccount to read back a pre-existing user after a 409 conflict.
+func (c *Client) GetUserByUsername(ctx context.Context, username string) (*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
+		Username: pointer(username),
+		Exact:    pointer(true),
+		Max:      pointer(1),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by username: %w", err)
+	}
+
+	if len(users) == 0 {
+		return nil, nil
+	}
+
+	return users[0], nil
+}
+
+// GetUserByEmail returns the user matching email exactly, or nil when none exists.
+// Used as a fallback read-back when a create conflict (409) was triggered by a
+// duplicate email rather than a duplicate username.
+func (c *Client) GetUserByEmail(ctx context.Context, email string) (*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
+		Email: pointer(email),
+		Exact: pointer(true),
+		Max:   pointer(1),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
+	}
+
+	if len(users) == 0 {
+		return nil, nil
+	}
+
+	return users[0], nil
+}
+
 func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
