@@ -86,7 +86,15 @@ Enable provisioning with the `--provisioning` flag (or `BATON_PROVISIONING=true`
 
 ## Account Management
 
-- **Create account** — `POST /admin/realms/{realm}/users` when C1 needs a new AppUser (`CreateAccount`). Supports random password (preferred) and no password (`UPDATE_PASSWORD` required action). Account deletion is not supported.
+- **Create account** — `POST /admin/realms/{realm}/users` when C1 needs a new AppUser (`CreateAccount`). Supports random password (preferred) and no password (`UPDATE_PASSWORD` required action).
+- **Delete account** — `DELETE /admin/realms/{realm}/users/{userId}` (`Delete`). Permanent hard delete; a 404 (already gone) is treated as success.
+
+## Actions
+
+- **`enable_user`** — reactivates a user (`PUT /admin/realms/{realm}/users/{userId}` with `enabled=true`).
+- **`disable_user`** — deactivates a user, reversibly (`PUT /admin/realms/{realm}/users/{userId}` with `enabled=false`).
+
+Both take a required `user_id` argument and are idempotent. Invoke with `--invoke-action=<name> --invoke-action-args='{"user_id":"<id>"}'` (no `-p` flag needed).
 
 ## Entitlement Management
 

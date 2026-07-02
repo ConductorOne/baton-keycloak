@@ -9,6 +9,7 @@ import (
 
 	"github.com/Clarilab/gocloaksession"
 	"github.com/Nerzal/gocloak/v13"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
 type Client struct {
@@ -65,7 +66,7 @@ func (c *Client) CreateUser(ctx context.Context, user gocloak.User) (string, err
 
 	userID, err := c.client.CreateUser(ctx, token.AccessToken, c.realm, user)
 	if err != nil {
-		return "", fmt.Errorf("failed to create user: %w", err)
+		return "", uhttp.WrapErrors(MapAPIError(err), "failed to create user", err)
 	}
 
 	return userID, nil
@@ -80,10 +81,46 @@ func (c *Client) GetUserByID(ctx context.Context, userID string) (*gocloak.User,
 
 	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by id: %w", err)
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
 	}
 
 	return user, nil
+}
+
+// DeleteUser permanently removes a user via DELETE /admin/realms/{realm}/users/{id}.
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	if err := c.client.DeleteUser(ctx, token.AccessToken, c.realm, userID); err != nil {
+		return uhttp.WrapErrors(MapAPIError(err), "failed to delete user", err)
+	}
+
+	return nil
+}
+
+// SetUserEnabled toggles a user's enabled flag via PUT /admin/realms/{realm}/users/{id}.
+// The Keycloak update replaces the whole representation, so the user is read back
+// first and only the enabled flag is changed to avoid clobbering other fields.
+func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get user by id: %w", err)
+	}
+
+	user.Enabled = pointer(enabled)
+	if err := c.client.UpdateUser(ctx, token.AccessToken, c.realm, *user); err != nil {
+		return fmt.Errorf("failed to update user enabled state: %w", err)
+	}
+
+	return nil
 }
 
 // GetUserByUsername returns the user matching username exactly, or nil when none exists.
@@ -118,7 +155,7 @@ func (c *Client) getUserByExactParams(ctx context.Context, params gocloak.GetUse
 
 	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by %s: %w", field, err)
+		return nil, uhttp.WrapErrors(MapAPIError(err), fmt.Sprintf("failed to get user by %s", field), err)
 	}
 
 	if len(users) == 0 {

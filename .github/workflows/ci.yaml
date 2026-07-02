@@ -93,10 +93,24 @@ jobs:
           baton-principal: "${{ steps.seed.outputs.user_id }}"
           baton-principal-type: "user"
 
-      - name: Account provisioning test
+      # Exercises CreateAccount and, because the connector advertises
+      # CAPABILITY_RESOURCE_DELETE, the deprovision path too: the action introspects
+      # capabilities, then creates the account, deletes it, re-deletes (404 handled as
+      # success), and verifies removal. No throwaway seed user needed.
+      - name: Account provisioning + deprovisioning test
         uses: ConductorOne/github-workflows/actions/account-provisioning@v3
         with:
           connector: ./baton-keycloak
           account-login: "ci.newuser"
           account-email: "ci.newuser@example.com"
           search-method: "login"
+
+      # Disable then re-enable the seeded user so it ends the run in its original
+      # (enabled) state. The action re-syncs and asserts STATUS_DISABLED / STATUS_ENABLED
+      # after each step; both handlers are idempotent.
+      - name: Account status lifecycle (enable/disable) test
+        uses: ConductorOne/github-workflows/actions/account-status-lifecycle-test@v3
+        with:
+          connector: ./baton-keycloak
+          account-id: "${{ steps.seed.outputs.user_id }}"
+          test-flow: disable-enable

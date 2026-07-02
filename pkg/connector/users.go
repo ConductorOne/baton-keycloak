@@ -206,6 +206,25 @@ func (o *userBuilder) CreateAccount(
 	return &v2.CreateAccountResponse_SuccessResult{Resource: ur}, ptds, nil, nil
 }
 
+// Delete permanently removes a Keycloak user (hard delete) via the Admin REST
+// API. A user that is already gone (404) is treated as success so the platform's
+// retries on an already-deleted user do not fail.
+func (o *userBuilder) Delete(ctx context.Context, resourceID *v2.ResourceId) (annotations.Annotations, error) {
+	if resourceID.GetResourceType() != userResourceType.Id {
+		return nil, fmt.Errorf("baton-keycloak: delete: invalid resource type %q, expected %q", resourceID.GetResourceType(), userResourceType.Id)
+	}
+
+	userID := resourceID.GetResource()
+	if err := o.client.DeleteUser(ctx, userID); err != nil {
+		if client.IsNotFoundError(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("baton-keycloak: delete user %s: %w", userID, err)
+	}
+
+	return nil, nil
+}
+
 // resolveExistingUser looks up a user for the read-back when CreateUser did not
 // return an ID (the user already existed). It matches by exact username first,
 // then falls back to email since a 409 can be triggered by either.
@@ -226,14 +245,17 @@ func (o *userBuilder) resolveExistingUser(ctx context.Context, username, email s
 	return user, nil
 }
 
-// extractUsername resolves the Keycloak username from the account login first,
-// then the profile map. Keycloak requires a username on every user.
+// extractUsername resolves the Keycloak username from the schema-declared
+// "username" profile field first, falling back to the account login only when
+// that field is empty. The schema field is what the admin typed into the
+// "Username" form, so it must win over C1's invitee login/email. Keycloak
+// requires a username on every user.
 func extractUsername(accountInfo *v2.AccountInfo, profileMap map[string]any) string {
+	if username, ok := profileMap["username"].(string); ok && username != "" {
+		return username
+	}
 	if login := accountInfo.GetLogin(); login != "" {
 		return login
-	}
-	if username, ok := profileMap["username"].(string); ok {
-		return username
 	}
 	return ""
 }
@@ -265,11 +287,17 @@ func newUserBuilder(client *client.Client) *userBuilder {
 //   - *v2.Resource: The converted Baton resource
 //   - error: Any conversion error that occurred
 func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
-	var userStatus = v2.UserTrait_Status_STATUS_ENABLED
 	username := safeString(user.Username)
 	email := safeString(user.Email)
 
-	profile := map[string]interface{}{
+	// Reflect the Keycloak "enabled" flag as the account status so a disabled
+	// (soft-deleted) user surfaces as STATUS_DISABLED in C1.
+	userStatus := v2.UserTrait_Status_STATUS_ENABLED
+	if user.Enabled != nil && !*user.Enabled {
+		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+	}
+
+	profile := map[string]any{
 		"username":  username,
 		"email":     email,
 		"firstName": safeString(user.FirstName),

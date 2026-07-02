@@ -15,27 +15,37 @@ This connector supports Keycloak versions up to v22.0.5.
 {/* AUTO-GENERATED:START - capabilities
      Generated from baton_capabilities.json. Do not edit manually. */}
 
-| Resource | Sync | Provision |
-| :------- | :--- | :-------- |
+| Resource | Sync                                                         | Provision                                                    |
+| :------- | :----------------------------------------------------------- | :----------------------------------------------------------- |
 | Accounts | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | <Icon icon="square-check" iconType="solid" color="#c937ae"/> |
-| Groups | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | <Icon icon="square-check" iconType="solid" color="#c937ae"/> |
+| Groups   | <Icon icon="square-check" iconType="solid" color="#c937ae"/> | <Icon icon="square-check" iconType="solid" color="#c937ae"/> |
 
 {/* AUTO-GENERATED:END - capabilities */}
 
 The Keycloak connector syncs the following resources:
 
-- **Accounts**: Keycloak realm users with username, email, name, login, and enabled status. Supports [automatic account creation](/product/admin/account-provisioning) when a user requests access but does not yet exist in the realm. Account deletion is not supported.
+- **Accounts**: Keycloak realm users with username, email, name, login, and enabled status. Supports [automatic account creation](/product/admin/account-provisioning) when a user requests access but does not yet exist in the realm, reversible enable/disable via connector actions, and permanent deletion.
 - **Groups**: Keycloak groups with a static `member` entitlement. Grant and revoke add or remove users from a group. Enable **Sync sub-groups** to sync nested group hierarchies; parent groups inherit membership from child groups during sync.
 
 **Additional functionality:**
-The Keycloak connector supports [automatic account provisioning](/product/admin/account-provisioning). New accounts can receive a generated password (**Random password**, preferred) or be created without a password so the user sets one at first login (**No password**).
+The Keycloak connector supports [automatic account provisioning](/product/admin/account-provisioning). New accounts can receive a generated password (**Random password**, preferred) or be created without a password so the user sets one at first login (**No password**). Accounts can be disabled (soft, reversible) or enabled again through connector actions, and permanently removed through deletion.
+
+### Connector actions
+
+Connector actions are custom capabilities that extend C1 automations with app-specific operations. You can use connector actions in the [Perform connector action](/product/admin/automations-steps-reference#perform-connector-action) automation step.
+
+| Action name    | Additional fields            | Description                                                     |
+| -------------- | ---------------------------- | --------------------------------------------------------------- |
+| `enable_user`  | `user_id` (string, required) | Reactivates a Keycloak user (sets `enabled=true`).              |
+| `disable_user` | `user_id` (string, required) | Deactivates a Keycloak user (sets `enabled=false`); reversible. |
 
 ## Gather Keycloak credentials
 
 Configuring the connector requires credentials generated in the Keycloak Admin Console. Gather these credentials before you move on.
 
 <Warning>
-A Keycloak realm administrator who can create confidential clients and assign **realm-management** client roles to service accounts must perform this task.
+  A Keycloak realm administrator who can create confidential clients and assign
+  **realm-management** client roles to service accounts must perform this task.
 </Warning>
 
 ### Create a Keycloak client
@@ -71,10 +81,10 @@ Click **Assign role**, filter by **Client roles**, and select the **realm-manage
 <Step>
 Assign these client roles to the service account:
 
-   - `manage-users` — required to create users and grant or revoke group membership
-   - `view-users` — required to sync users and read back created accounts
-   - `query-users` — required to list and search users during sync
-   - `query-groups` — required to list groups during sync
+- `manage-users` — required to create users and grant or revoke group membership
+- `view-users` — required to sync users and read back created accounts
+- `query-users` — required to list and search users during sync
+- `query-groups` — required to list groups during sync
 
 </Step>
 <Step>
@@ -83,7 +93,9 @@ Note your Keycloak **server URL** and **realm** name for connector configuration
 </Steps>
 
 <Note>
-A **403 Forbidden** response when creating users means the service account is missing the `manage-users` role. This is a realm configuration issue, not a connector defect.
+  A **403 Forbidden** response when creating users means the service account is
+  missing the `manage-users` role. This is a realm configuration issue, not a
+  connector defect.
 </Note>
 
 For more information, see the [Keycloak Server Administration Guide](https://www.keycloak.org/docs/latest/server_admin/).
@@ -97,7 +109,7 @@ To complete this task, you need:
 
 - The **Connector Administrator** or **Super Administrator** role in C1
 - The Keycloak credentials generated by following the instructions above
-</Warning>
+  </Warning>
 
 <Tabs>
 <Tab title="Cloud-hosted">
@@ -113,15 +125,16 @@ Search for **Keycloak** and click **Add**.
 <Step>
 Choose how to set up the new Keycloak connector:
 
-   - Add the connector to a currently unmanaged app (select from the list of apps that were discovered in your identity, SSO, or federation provider that are not yet managed with C1)
-   - Add the connector to a managed app (select from the list of existing managed apps)
-   - Create a new managed app
+- Add the connector to a currently unmanaged app (select from the list of apps that were discovered in your identity, SSO, or federation provider that are not yet managed with C1)
+- Add the connector to a managed app (select from the list of existing managed apps)
+- Create a new managed app
 
 </Step>
 <Step>
 Set the owner for this connector. You can manage the connector yourself, or choose someone else from the list of C1 users. Setting multiple owners is allowed.
 
 If you choose someone else, C1 notifies the new connector owner by email that their help is needed to complete the setup process.
+
 </Step>
 <Step>
 Click **Next**.
@@ -152,6 +165,7 @@ The connector label changes to **Syncing**, followed by **Connected**. You can v
 </Steps>
 
 **Done.** Your Keycloak connector is now pulling access data into C1.
+
 </Tab>
 
 <Tab title="Self-hosted">
@@ -161,9 +175,9 @@ When running in service mode on Kubernetes, a self-hosted connector maintains an
 
 ### Resources
 
-* [Official download center](https://dist.conductorone.com/ConductorOne/baton-keycloak): For stable binaries (Windows/Linux/macOS) and container images.
+- [Official download center](https://dist.conductorone.com/ConductorOne/baton-keycloak): For stable binaries (Windows/Linux/macOS) and container images.
 
-* [GitHub repository](https://github.com/conductorone/baton-keycloak): Access the source code, report issues, or contribute to the project.
+- [GitHub repository](https://github.com/conductorone/baton-keycloak): Access the source code, report issues, or contribute to the project.
 
 ### Step 1: Set up a new Keycloak connector
 
@@ -177,15 +191,16 @@ Search for **Baton** and click **Add**.
 <Step>
 Choose how to set up the new Keycloak connector:
 
-   - Add the connector to a currently unmanaged app
-   - Add the connector to a managed app
-   - Create a new managed app
+- Add the connector to a currently unmanaged app
+- Add the connector to a managed app
+- Create a new managed app
 
 </Step>
 <Step>
 Set the owner for this connector. You can manage the connector yourself, or choose someone else from the list of C1 users. Setting multiple owners is allowed.
 
 If you choose someone else, C1 notifies the new connector owner by email that their help is needed to complete the setup process.
+
 </Step>
 <Step>
 Click **Next**.
@@ -197,6 +212,7 @@ In the **Settings** area of the page, click **Edit**.
 Click **Rotate** to generate a new Client ID and Secret.
 
 Carefully copy and save these credentials. You use them in Step 2.
+
 </Step>
 </Steps>
 
@@ -232,7 +248,10 @@ stringData:
 ```
 
 <Note>
-**Syncing subgroups**: Set `BATON_SYNC_SUB_GROUPS` to `true` to sync nested Keycloak group hierarchies. When enabled, subgroup membership relationships are surfaced in C1, and grant and revoke operations are supported for nested groups.
+  **Syncing subgroups**: Set `BATON_SYNC_SUB_GROUPS` to `true` to sync nested
+  Keycloak group hierarchies. When enabled, subgroup membership relationships
+  are surfaced in C1, and grant and revoke operations are supported for nested
+  groups.
 </Note>
 
 See the connector [README](https://github.com/conductorone/baton-keycloak) or run `--help` for all configuration flags and environment variables.
@@ -259,28 +278,33 @@ spec:
         baton-app: keycloak
     spec:
       containers:
-      - name: baton-keycloak
-        image: public.ecr.aws/conductorone/baton-keycloak:latest
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: BATON_HOST_ID
-          value: baton-keycloak
-        envFrom:
-        - secretRef:
-            name: baton-keycloak-secrets
+        - name: baton-keycloak
+          image: public.ecr.aws/conductorone/baton-keycloak:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BATON_HOST_ID
+              value: baton-keycloak
+          envFrom:
+            - secretRef:
+                name: baton-keycloak-secrets
 ```
 
 ### Step 3: Deploy the connector
 
 <Steps>
-<Step>
-Create a namespace in which to run C1 connectors (if desired), then apply the secret config and deployment config files.
-</Step>
-<Step>
-Check that the connector data uploaded correctly. In C1, click **Apps**. On the **Managed apps** tab, locate and click the name of the application you added the Keycloak connector to. Keycloak data should be found on the **Entitlements** and **Accounts** tabs.
-</Step>
+  <Step>
+    Create a namespace in which to run C1 connectors (if desired), then apply
+    the secret config and deployment config files.
+  </Step>
+  <Step>
+    Check that the connector data uploaded correctly. In C1, click **Apps**. On
+    the **Managed apps** tab, locate and click the name of the application you
+    added the Keycloak connector to. Keycloak data should be found on the
+    **Entitlements** and **Accounts** tabs.
+  </Step>
 </Steps>
 
 **Done.** Your Keycloak connector is now pulling access data into C1.
+
 </Tab>
 </Tabs>
