@@ -89,43 +89,36 @@ func (c *Client) GetUserByID(ctx context.Context, userID string) (*gocloak.User,
 // GetUserByUsername returns the user matching username exactly, or nil when none exists.
 // Used by CreateAccount to read back a pre-existing user after a 409 conflict.
 func (c *Client) GetUserByUsername(ctx context.Context, username string) (*gocloak.User, error) {
-	token, err := c.session.GetKeycloakAuthToken()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
-	}
-
-	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
+	return c.getUserByExactParams(ctx, gocloak.GetUsersParams{
 		Username: pointer(username),
 		Exact:    pointer(true),
 		Max:      pointer(1),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user by username: %w", err)
-	}
-
-	if len(users) == 0 {
-		return nil, nil
-	}
-
-	return users[0], nil
+	}, "username")
 }
 
 // GetUserByEmail returns the user matching email exactly, or nil when none exists.
 // Used as a fallback read-back when a create conflict (409) was triggered by a
 // duplicate email rather than a duplicate username.
 func (c *Client) GetUserByEmail(ctx context.Context, email string) (*gocloak.User, error) {
+	return c.getUserByExactParams(ctx, gocloak.GetUsersParams{
+		Email: pointer(email),
+		Exact: pointer(true),
+		Max:   pointer(1),
+	}, "email")
+}
+
+// getUserByExactParams runs an exact-match user lookup (by username or email) and
+// returns the single result, or nil when none exists. field names the lookup key
+// for the error message. Shared by GetUserByUsername and GetUserByEmail.
+func (c *Client) getUserByExactParams(ctx context.Context, params gocloak.GetUsersParams, field string) (*gocloak.User, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
-	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
-		Email: pointer(email),
-		Exact: pointer(true),
-		Max:   pointer(1),
-	})
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user by email: %w", err)
+		return nil, fmt.Errorf("failed to get user by %s: %w", field, err)
 	}
 
 	if len(users) == 0 {

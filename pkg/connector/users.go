@@ -176,7 +176,7 @@ func (o *userBuilder) CreateAccount(
 	}
 
 	userID, err := o.client.CreateUser(ctx, newUser)
-	alreadyExists := err != nil && client.IsAlreadyExistsError(err)
+	alreadyExists := client.IsAlreadyExistsError(err)
 	if err != nil && !alreadyExists {
 		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: %w", username, err)
 	}
