@@ -120,19 +120,19 @@ func (o *userBuilder) CreateAccount(
 	error,
 ) {
 	if credentialOptions == nil {
-		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account: missing credential options")
+		return nil, nil, nil, status.Error(codes.InvalidArgument, "baton-keycloak: create-account: missing credential options")
 	}
 
 	profileMap := accountInfo.GetProfile().AsMap()
 
 	username := extractUsername(accountInfo, profileMap)
 	if username == "" {
-		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account: username is required")
+		return nil, nil, nil, status.Error(codes.InvalidArgument, "baton-keycloak: create-account: username is required")
 	}
 
 	email, _ := profileMap["email"].(string)
 	if email == "" {
-		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: email is required", username)
+		return nil, nil, nil, status.Errorf(codes.InvalidArgument, "baton-keycloak: create-account %s: email is required", username)
 	}
 
 	firstName, _ := profileMap["firstName"].(string)
