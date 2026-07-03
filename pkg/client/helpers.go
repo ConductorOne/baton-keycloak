@@ -8,9 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// IsAlreadyExistsError reports whether err is a Keycloak 409 Conflict. The Admin
-// REST API returns 409 from POST .../users when the username or email already
-// exists, which CreateAccount must treat as success (AlreadyExistsResult).
+// IsAlreadyExistsError reports whether err is a Keycloak 409 Conflict (duplicate username/email on create).
 func IsAlreadyExistsError(err error) bool {
 	if err == nil {
 		return false
@@ -22,9 +20,7 @@ func IsAlreadyExistsError(err error) bool {
 	return false
 }
 
-// IsNotFoundError reports whether err is a Keycloak 404 Not Found. Delete must
-// treat a missing user as success (GrantAlreadyRevoked semantics), so the C1
-// platform's retries on an already-deleted user do not fail.
+// IsNotFoundError reports whether err is a Keycloak 404 Not Found.
 func IsNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -37,12 +33,8 @@ func IsNotFoundError(err error) bool {
 }
 
 // MapAPIError maps a Keycloak Admin API error to the closest gRPC status code.
-// gocloak surfaces *gocloak.APIError carrying the HTTP status but no gRPC code,
-// so without this mapping every failure reaches C1 as codes.Unknown, which the
-// platform cannot classify for retry (retryable 429/5xx look identical to a
-// terminal 400/403). Returns codes.OK for a nil error and codes.Unknown when the
-// error is not a *gocloak.APIError. Pair with uhttp.WrapErrors so the original
-// error stays in the chain and IsAlreadyExistsError/IsNotFoundError keep working.
+// Returns codes.OK for a nil error and codes.Unknown for a non-*gocloak.APIError.
+// Pair with uhttp.WrapErrors so the original error stays in the chain.
 func MapAPIError(err error) codes.Code {
 	if err == nil {
 		return codes.OK

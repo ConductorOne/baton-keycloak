@@ -11,9 +11,11 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/crypto"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// requiredActionUpdatePassword is a required action that forces a NO_PASSWORD user to set their own credential at first login.
+// requiredActionUpdatePassword forces a NO_PASSWORD user to set a credential at first login.
 const requiredActionUpdatePassword = "UPDATE_PASSWORD"
 
 // userBuilder implements the resource builder interface for Keycloak user resources.
@@ -94,9 +96,7 @@ func (o *userBuilder) Grants(ctx context.Context, resource *v2.Resource, attrs r
 	return nil, nil, nil
 }
 
-// CreateAccountCapabilityDetails declares which credential options the connector
-// supports when provisioning a Keycloak account. RANDOM_PASSWORD is preferred:
-// Keycloak admin-created users can have a non-temporary password set immediately.
+// CreateAccountCapabilityDetails declares the credential options supported when provisioning an account (RANDOM_PASSWORD preferred).
 func (o *userBuilder) CreateAccountCapabilityDetails(ctx context.Context) (*v2.CredentialDetailsAccountProvisioning, annotations.Annotations, error) {
 	return &v2.CredentialDetailsAccountProvisioning{
 		SupportedCredentialOptions: []v2.CapabilityDetailCredentialOption{
@@ -107,12 +107,8 @@ func (o *userBuilder) CreateAccountCapabilityDetails(ctx context.Context) (*v2.C
 	}, nil, nil
 }
 
-// CreateAccount provisions a new user in the Keycloak realm. The credential is
-// set inline on the create call (atomic, single request): RANDOM_PASSWORD sets a
-// non-temporary password returned via PlaintextData, NO_PASSWORD creates the user
-// with a one-time UPDATE_PASSWORD required action. After creating, the user is
-// read back to build the resource. A duplicate username/email (409) is treated as
-// success via AlreadyExistsResult.
+// CreateAccount provisions a new user in the realm, setting the credential inline
+// on the create call. A duplicate username/email (409) is returned as AlreadyExistsResult.
 func (o *userBuilder) CreateAccount(
 	ctx context.Context,
 	accountInfo *v2.AccountInfo,
@@ -145,13 +141,12 @@ func (o *userBuilder) CreateAccount(
 	newUser := gocloak.User{
 		Username:  gocloak.StringP(username),
 		Enabled:   gocloak.BoolP(true),
-		Email:     stringPOrNil(email),
+		Email:     gocloak.StringP(email),
 		FirstName: stringPOrNil(firstName),
 		LastName:  stringPOrNil(lastName),
 	}
 
-	// Build the credential inline so create + password are a single atomic call.
-	// NO_PASSWORD instead attaches a one-time UPDATE_PASSWORD action.
+	// NO_PASSWORD attaches a one-time UPDATE_PASSWORD action; otherwise set the password inline.
 	var ptds []*v2.PlaintextData
 	if credentialOptions.GetNoPassword() != nil {
 		newUser.RequiredActions = &[]string{requiredActionUpdatePassword}
@@ -181,9 +176,7 @@ func (o *userBuilder) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("baton-keycloak: create-account %s: %w", username, err)
 	}
 
-	// Read the user back to build the resource. A fresh create returns only the
-	// ID, so fetch by ID. A 409 conflict returns no ID, so look the pre-existing
-	// user up by username (then email).
+	// Read back to build the resource: by ID for a fresh create, by username/email after a 409 (no ID returned).
 	var user *gocloak.User
 	if userID != "" {
 		user, err = o.client.GetUserByID(ctx, userID)
@@ -206,12 +199,10 @@ func (o *userBuilder) CreateAccount(
 	return &v2.CreateAccountResponse_SuccessResult{Resource: ur}, ptds, nil, nil
 }
 
-// Delete permanently removes a Keycloak user (hard delete) via the Admin REST
-// API. A user that is already gone (404) is treated as success so the platform's
-// retries on an already-deleted user do not fail.
+// Delete hard-deletes a Keycloak user; a missing user (404) is treated as success.
 func (o *userBuilder) Delete(ctx context.Context, resourceID *v2.ResourceId) (annotations.Annotations, error) {
 	if resourceID.GetResourceType() != userResourceType.Id {
-		return nil, fmt.Errorf("baton-keycloak: delete: invalid resource type %q, expected %q", resourceID.GetResourceType(), userResourceType.Id)
+		return nil, status.Errorf(codes.InvalidArgument, "baton-keycloak: delete: invalid resource type %q, expected %q", resourceID.GetResourceType(), userResourceType.Id)
 	}
 
 	userID := resourceID.GetResource()
@@ -225,9 +216,7 @@ func (o *userBuilder) Delete(ctx context.Context, resourceID *v2.ResourceId) (an
 	return nil, nil
 }
 
-// resolveExistingUser looks up a user for the read-back when CreateUser did not
-// return an ID (the user already existed). It matches by exact username first,
-// then falls back to email since a 409 can be triggered by either.
+// resolveExistingUser looks up a user after a create conflict, matching by username then email.
 func (o *userBuilder) resolveExistingUser(ctx context.Context, username, email string) (*gocloak.User, error) {
 	user, err := o.client.GetUserByUsername(ctx, username)
 	if err != nil {
@@ -245,11 +234,8 @@ func (o *userBuilder) resolveExistingUser(ctx context.Context, username, email s
 	return user, nil
 }
 
-// extractUsername resolves the Keycloak username from the schema-declared
-// "username" profile field first, falling back to the account login only when
-// that field is empty. The schema field is what the admin typed into the
-// "Username" form, so it must win over C1's invitee login/email. Keycloak
-// requires a username on every user.
+// extractUsername resolves the username: the schema-declared "username" profile
+// field wins, falling back to the account login only when it is empty.
 func extractUsername(accountInfo *v2.AccountInfo, profileMap map[string]any) string {
 	if username, ok := profileMap["username"].(string); ok && username != "" {
 		return username
@@ -260,8 +246,7 @@ func extractUsername(accountInfo *v2.AccountInfo, profileMap map[string]any) str
 	return ""
 }
 
-// stringPOrNil returns a pointer to s, or nil when s is empty, so optional
-// gocloak.User fields are omitted rather than sent as empty strings.
+// stringPOrNil returns a pointer to s, or nil when s is empty.
 func stringPOrNil(s string) *string {
 	if s == "" {
 		return nil
@@ -279,19 +264,11 @@ func newUserBuilder(client *client.Client) *userBuilder {
 }
 
 // parseIntoUserResource converts a Keycloak user object into a Baton SDK user resource.
-// Parameters:
-//   - user: Pointer to the Keycloak user object to convert
-//   - parentResourceID: Optional parent resource ID for hierarchy
-//
-// Returns:
-//   - *v2.Resource: The converted Baton resource
-//   - error: Any conversion error that occurred
 func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
 	username := safeString(user.Username)
 	email := safeString(user.Email)
 
-	// Reflect the Keycloak "enabled" flag as the account status so a disabled
-	// (soft-deleted) user surfaces as STATUS_DISABLED in C1.
+	// Reflect the Keycloak enabled flag as account status (disabled → STATUS_DISABLED).
 	userStatus := v2.UserTrait_Status_STATUS_ENABLED
 	if user.Enabled != nil && !*user.Enabled {
 		userStatus = v2.UserTrait_Status_STATUS_DISABLED

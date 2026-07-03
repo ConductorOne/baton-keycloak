@@ -56,53 +56,39 @@ var enableUserSchema = &v2.BatonActionSchema{
 	},
 }
 
-// Compile-time assertion: Connector must satisfy GlobalActionProvider so a
-// mis-wired interface fails the build, not the platform. Global (not
-// resource-scoped) registration is required so the actions are invokable via
-// the ActionService (CLI --invoke-action and C1's "Perform connector action").
+// Compile-time check that Connector implements GlobalActionProvider.
 var _ connectorbuilder.GlobalActionProvider = (*Connector)(nil)
 
 // GlobalActions registers the enable_user / disable_user lifecycle actions.
 func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRegistry) error {
-	if err := registry.Register(ctx, disableUserSchema, c.disableUserHandler); err != nil {
+	if err := registry.Register(ctx, disableUserSchema, c.setEnabledHandler(actionDisableUser, false)); err != nil {
 		return fmt.Errorf("baton-keycloak: register disable_user: %w", err)
 	}
-	return registry.Register(ctx, enableUserSchema, c.enableUserHandler)
+	if err := registry.Register(ctx, enableUserSchema, c.setEnabledHandler(actionEnableUser, true)); err != nil {
+		return fmt.Errorf("baton-keycloak: register enable_user: %w", err)
+	}
+	return nil
 }
 
-// disableUserHandler deactivates a user (enabled=false). Idempotent: Keycloak's
-// update returns 204 whether or not the user was already disabled.
-func (c *Connector) disableUserHandler(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-	userID, err := userIDArg(args)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if err := c.client.SetUserEnabled(ctx, userID, false); err != nil {
-		if client.IsNotFoundError(err) {
-			return nil, nil, status.Errorf(codes.NotFound, "baton-keycloak: disable_user: user %s not found", userID)
+// setEnabledHandler builds the handler for a lifecycle action that toggles a
+// user's enabled flag (enabled=false for disable_user, true for enable_user).
+// Idempotent; a 404 maps to NotFound and other errors keep their mapped gRPC code.
+func (c *Connector) setEnabledHandler(actionName string, enabled bool) actions.ActionHandler {
+	return func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
+		userID, err := userIDArg(args)
+		if err != nil {
+			return nil, nil, err
 		}
-		return nil, nil, status.Errorf(codes.Internal, "baton-keycloak: disable_user %s: %v", userID, err)
-	}
 
-	return successStruct(), nil, nil
-}
-
-// enableUserHandler reactivates a user (enabled=true). Idempotent like disable.
-func (c *Connector) enableUserHandler(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-	userID, err := userIDArg(args)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if err := c.client.SetUserEnabled(ctx, userID, true); err != nil {
-		if client.IsNotFoundError(err) {
-			return nil, nil, status.Errorf(codes.NotFound, "baton-keycloak: enable_user: user %s not found", userID)
+		if err := c.client.SetUserEnabled(ctx, userID, enabled); err != nil {
+			if client.IsNotFoundError(err) {
+				return nil, nil, status.Errorf(codes.NotFound, "baton-keycloak: %s: user %s not found", actionName, userID)
+			}
+			return nil, nil, fmt.Errorf("baton-keycloak: %s user %s: %w", actionName, userID, err)
 		}
-		return nil, nil, status.Errorf(codes.Internal, "baton-keycloak: enable_user %s: %v", userID, err)
-	}
 
-	return successStruct(), nil, nil
+		return successStruct(), nil, nil
+	}
 }
 
 // userIDArg extracts and validates the required user_id action argument nil-safely.
@@ -117,8 +103,7 @@ func userIDArg(args *structpb.Struct) (string, error) {
 	return userID, nil
 }
 
-// successStruct returns the standard {"success": true} action response. Direct
-// construction avoids the always-nil error from structpb.NewStruct for a bool.
+// successStruct returns the standard {"success": true} action response.
 func successStruct() *structpb.Struct {
 	return &structpb.Struct{
 		Fields: map[string]*structpb.Value{
