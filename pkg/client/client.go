@@ -241,6 +241,172 @@ func parseMajorVersion(version string) (int, error) {
 	return strconv.Atoi(majorStr)
 }
 
+func (c *Client) GetRealmRoles(ctx context.Context, first int) ([]*gocloak.Role, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	roles, err := c.client.GetRealmRoles(ctx, token.AccessToken, c.realm, gocloak.GetRoleParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get realm roles: %w", err)
+	}
+
+	if len(roles) == 0 {
+		return nil, "", nil
+	}
+
+	nextToken := ""
+	if len(roles) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(roles))
+	}
+
+	return roles, nextToken, nil
+}
+
+func (c *Client) GetUsersByRealmRoleName(ctx context.Context, roleName string, first int) ([]*gocloak.User, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	users, err := c.client.GetUsersByRoleName(ctx, token.AccessToken, c.realm, roleName, gocloak.GetUsersByRoleParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get users by realm role name: %w", err)
+	}
+
+	if len(users) == 0 {
+		return nil, "", nil
+	}
+
+	nextToken := ""
+	if len(users) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(users))
+	}
+
+	return users, nextToken, nil
+}
+
+func (c *Client) AddRealmRoleToUser(ctx context.Context, userID string, role gocloak.Role) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.AddRealmRoleToUser(ctx, token.AccessToken, c.realm, userID, []gocloak.Role{role})
+}
+
+func (c *Client) DeleteRealmRoleFromUser(ctx context.Context, userID string, role gocloak.Role) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.DeleteRealmRoleFromUser(ctx, token.AccessToken, c.realm, userID, []gocloak.Role{role})
+}
+
+func (c *Client) GetClients(ctx context.Context, first int) ([]*gocloak.Client, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	clients, err := c.client.GetClients(ctx, token.AccessToken, c.realm, gocloak.GetClientsParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get clients: %w", err)
+	}
+
+	if len(clients) == 0 {
+		return nil, "", nil
+	}
+
+	nextToken := ""
+	if len(clients) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(clients))
+	}
+
+	return clients, nextToken, nil
+}
+
+func (c *Client) GetClientRoles(ctx context.Context, idOfClient string, first int) ([]*gocloak.Role, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	roles, err := c.client.GetClientRoles(ctx, token.AccessToken, c.realm, idOfClient, gocloak.GetRoleParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get client roles: %w", err)
+	}
+
+	if len(roles) == 0 {
+		return nil, "", nil
+	}
+
+	nextToken := ""
+	if len(roles) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(roles))
+	}
+
+	return roles, nextToken, nil
+}
+
+func (c *Client) GetUsersByClientRoleName(ctx context.Context, idOfClient, roleName string, first int) ([]*gocloak.User, string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	users, err := c.client.GetUsersByClientRoleName(ctx, token.AccessToken, c.realm, idOfClient, roleName, gocloak.GetUsersByRoleParams{
+		First: pointer(first),
+		Max:   defaultMax,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get users by client role name: %w", err)
+	}
+
+	if len(users) == 0 {
+		return nil, "", nil
+	}
+
+	nextToken := ""
+	if len(users) >= *defaultMax {
+		nextToken = strconv.Itoa(first + len(users))
+	}
+
+	return users, nextToken, nil
+}
+
+func (c *Client) AddClientRoleToUser(ctx context.Context, idOfClient, userID string, role gocloak.Role) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.AddClientRolesToUser(ctx, token.AccessToken, c.realm, idOfClient, userID, []gocloak.Role{role})
+}
+
+func (c *Client) DeleteClientRoleFromUser(ctx context.Context, idOfClient, userID string, role gocloak.Role) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return c.client.DeleteClientRolesFromUser(ctx, token.AccessToken, c.realm, idOfClient, userID, []gocloak.Role{role})
+}
+
 func (c *Client) Close() error {
 	return nil
 }

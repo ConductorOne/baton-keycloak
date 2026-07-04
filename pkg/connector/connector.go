@@ -29,6 +29,9 @@ func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 	return []connectorbuilder.ResourceSyncerV2{
 		newUserBuilder(c.client),
 		newGroupBuilder(c.client, c.syncSubGroups, c.keycloakVersion),
+		newRealmRoleBuilder(c.client),
+		newClientBuilder(c.client),
+		newClientRoleBuilder(c.client),
 	}
 }
 
@@ -42,7 +45,7 @@ func (c *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.R
 func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
 		DisplayName: "baton-keycloak",
-		Description: "Connector syncing users and groups from Keycloak",
+		Description: "Connector syncing users, groups, realm roles, clients, and client roles from Keycloak",
 	}, nil
 }
 
