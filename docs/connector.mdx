@@ -34,10 +34,11 @@ The Keycloak connector supports [automatic account provisioning](/product/admin/
 
 Connector actions are custom capabilities that extend C1 automations with app-specific operations. You can use connector actions in the [Perform connector action](/product/admin/automations-steps-reference#perform-connector-action) automation step.
 
-| Action name    | Additional fields            | Description                                                     |
-| -------------- | ---------------------------- | --------------------------------------------------------------- |
-| `enable_user`  | `user_id` (string, required) | Reactivates a Keycloak user (sets `enabled=true`).              |
-| `disable_user` | `user_id` (string, required) | Deactivates a Keycloak user (sets `enabled=false`); reversible. |
+| Action name    | Additional fields                                                                | Description                                                                   |
+| -------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `enable_user`  | `user_id` (string, required)                                                     | Reactivates a Keycloak user (sets `enabled=true`).                            |
+| `disable_user` | `user_id` (string, required)                                                     | Deactivates a Keycloak user (sets `enabled=false`); reversible.               |
+| `update_user`  | `user_id` (string, required), `user_profile` (JSON string, required)             | Updates a Keycloak user's profile attributes (`email`, `firstName`, `lastName`). |
 
 ## Gather Keycloak credentials
 

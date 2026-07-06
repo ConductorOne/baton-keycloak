@@ -23,6 +23,7 @@
    - User accounts via CreateAccount (POST /admin/realms/{realm}/users)
    - User deletion via Delete (DELETE /admin/realms/{realm}/users/{userId}) — permanent, hard delete
    - User enable/disable via the `enable_user` / `disable_user` actions (PUT /admin/realms/{realm}/users/{userId}, toggling `enabled`) — soft, reversible
+   - User profile updates via the `update_user` action (PUT /admin/realms/{realm}/users/{userId}, `email` / `firstName` / `lastName`)
    - Group membership via Grant (PUT .../groups/{groupId}) and Revoke (DELETE .../groups/{groupId})
 
    It does **not** support realm/client role resources.
@@ -88,7 +89,9 @@
 - **Entitlements**: None (`SkipEntitlementsAndGrants` — membership grants are emitted from the group side)
 - **Grants**: None (emitted from the group builder)
 - **Provisioning**: CreateAccount (POST /admin/realms/{realm}/users). Credentials are set inline on create (atomic single call): **Random password** (preferred) writes a non-temporary password returned via `PlaintextData`; **No password** creates the user with a one-time `UPDATE_PASSWORD` required action. A duplicate username or email returns **409 Conflict**, which the connector treats as success (`AlreadyExistsResult`) after reading the user back by username, then by email. Existing accounts are not password-reset on idempotent retry. Delete (DELETE /admin/realms/{realm}/users/{userId}) permanently removes the user; a 404 (already gone) is treated as success.
-- **Actions**: `enable_user` and `disable_user` — toggle the user's `enabled` flag via PUT /admin/realms/{realm}/users/{userId} (the representation is read back first so only `enabled` changes). Both take a required `user_id` argument and are idempotent. Disable is a reversible soft deactivation; a disabled user surfaces as `STATUS_DISABLED` on the next sync.
+- **Actions**:
+  - `enable_user` / `disable_user` — toggle the user's `enabled` flag via PUT /admin/realms/{realm}/users/{userId} (the representation is read back first so only `enabled` changes). Both take a required `user_id` argument and are idempotent. Disable is a reversible soft deactivation; a disabled user surfaces as `STATUS_DISABLED` on the next sync.
+  - `update_user` — updates a user's profile attributes (`email`, `firstName`, `lastName`) via PUT /admin/realms/{realm}/users/{userId}. Takes a required `user_id` plus a `user_profile` JSON object; only the keys present are changed (read-modify-write preserves the rest). A request with no updatable field is rejected as `InvalidArgument`. Registered as a global `ACTION_TYPE_ACCOUNT_UPDATE_PROFILE` action so C1 profile push rules can discover it.
 
 ### Groups
 
@@ -118,7 +121,7 @@ Keycloak Admin REST API (auth: Bearer token from client credentials):
 - `GET    /admin/realms/{realm}/users?first=&max=` — List users
 - `GET    /admin/realms/{realm}/users/{id}` — Fetch a single user (read-back after create)
 - `POST   /admin/realms/{realm}/users` — Create user (account provisioning)
-- `PUT    /admin/realms/{realm}/users/{id}` — Update user (enable/disable actions toggle `enabled`)
+- `PUT    /admin/realms/{realm}/users/{id}` — Update user (enable/disable toggle `enabled`; `update_user` updates email/firstName/lastName)
 - `DELETE /admin/realms/{realm}/users/{id}` — Delete user (hard delete / deprovision)
 - `GET    /admin/realms/{realm}/users?username=&exact=true` — Look up user by username (409 read-back)
 - `GET    /admin/realms/{realm}/users?email=&exact=true` — Look up user by email (409 read-back fallback)

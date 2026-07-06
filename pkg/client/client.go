@@ -109,7 +109,8 @@ func (c *Client) DeleteUser(ctx context.Context, userID string) error {
 }
 
 // SetUserEnabled toggles a user's enabled flag. The user is read back first so
-// the full-representation update keeps other fields.
+// the full-representation update keeps other fields, and so the update is skipped
+// when the user is already in the desired state.
 // GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
 func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool) error {
 	token, err := c.session.GetKeycloakAuthToken()
@@ -122,12 +123,70 @@ func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool
 		return uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
 	}
 
+	// Skip the update when the user is already in the desired state.
+	if user.Enabled != nil && *user.Enabled == enabled {
+		return nil
+	}
+
 	user.Enabled = pointer(enabled)
 	if err := c.client.UpdateUser(ctx, token.AccessToken, c.realm, *user); err != nil {
 		return uhttp.WrapErrors(MapAPIError(err), "failed to update user enabled state", err)
 	}
 
 	return nil
+}
+
+// UpdateUserProfile applies the provided profile attributes (email, firstName,
+// lastName) to a user and returns the names of the fields that changed. The user
+// is read first so the full-representation update preserves every other field
+// (Keycloak's PUT replaces the whole user), which also means only the keys
+// present in profile are touched. Returns an empty slice when profile carries no
+// updatable field, so the caller can reject the request without an API write.
+// GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
+func (c *Client) UpdateUserProfile(ctx context.Context, userID string, profile map[string]any) ([]string, error) {
+	// Extract recognized fields before any API call so a no-op request costs nothing.
+	email, hasEmail := profileString(profile, "email")
+	firstName, hasFirstName := profileString(profile, "firstName")
+	lastName, hasLastName := profileString(profile, "lastName")
+	if !hasEmail && !hasFirstName && !hasLastName {
+		return nil, nil
+	}
+
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
+	}
+
+	var updated []string
+	if hasEmail {
+		user.Email = pointer(email)
+		updated = append(updated, "email")
+	}
+	if hasFirstName {
+		user.FirstName = pointer(firstName)
+		updated = append(updated, "firstName")
+	}
+	if hasLastName {
+		user.LastName = pointer(lastName)
+		updated = append(updated, "lastName")
+	}
+
+	if err := c.client.UpdateUser(ctx, token.AccessToken, c.realm, *user); err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to update user profile", err)
+	}
+
+	return updated, nil
+}
+
+// profileString returns the string value at key and whether it was present as a string.
+func profileString(profile map[string]any, key string) (string, bool) {
+	v, ok := profile[key].(string)
+	return v, ok
 }
 
 // GetUserByUsername returns the user matching username exactly, or nil when none exists.

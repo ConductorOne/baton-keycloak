@@ -93,8 +93,21 @@ Enable provisioning with the `--provisioning` flag (or `BATON_PROVISIONING=true`
 
 - **`enable_user`** — reactivates a user (`PUT /admin/realms/{realm}/users/{userId}` with `enabled=true`).
 - **`disable_user`** — deactivates a user, reversibly (`PUT /admin/realms/{realm}/users/{userId}` with `enabled=false`).
+- **`update_user`** — updates a user's profile attributes — `email`, `firstName`, `lastName` (`PUT /admin/realms/{realm}/users/{userId}`, read-modify-write so untouched fields are preserved).
 
-Both take a required `user_id` argument and are idempotent. Invoke with `--invoke-action=<name> --invoke-action-args='{"user_id":"<id>"}'` (no `-p` flag needed).
+`enable_user` / `disable_user` take a required `user_id` argument and are idempotent:
+
+```
+--invoke-action=enable_user --invoke-action-args='{"user_id":"<id>"}'
+```
+
+`update_user` takes `user_id` plus a `user_profile` JSON object; only the keys present are changed, and a request with no updatable field is rejected:
+
+```
+--invoke-action=update_user --invoke-action-args='{"user_id":"<id>","user_profile":"{\"firstName\":\"Jane\",\"email\":\"jane@example.com\"}"}'
+```
+
+Actions do not need the `-p` flag.
 
 ## Entitlement Management
 
