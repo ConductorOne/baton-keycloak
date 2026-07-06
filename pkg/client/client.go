@@ -108,9 +108,8 @@ func (c *Client) DeleteUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-// SetUserEnabled toggles a user's enabled flag. The user is read back first so
-// the full-representation update keeps other fields, and so the update is skipped
-// when the user is already in the desired state.
+// SetUserEnabled toggles a user's enabled flag, reading the user first so the
+// update preserves other fields and is skipped when already in that state.
 // GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
 func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool) error {
 	token, err := c.session.GetKeycloakAuthToken()
@@ -123,7 +122,6 @@ func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool
 		return uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
 	}
 
-	// Skip the update when the user is already in the desired state.
 	if user.Enabled != nil && *user.Enabled == enabled {
 		return nil
 	}
@@ -136,15 +134,11 @@ func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool
 	return nil
 }
 
-// UpdateUserProfile applies the provided profile attributes (email, firstName,
-// lastName) to a user and returns the names of the fields that changed. The user
-// is read first so the full-representation update preserves every other field
-// (Keycloak's PUT replaces the whole user), which also means only the keys
-// present in profile are touched. Returns an empty slice when profile carries no
-// updatable field, so the caller can reject the request without an API write.
+// UpdateUserProfile updates a user's email/firstName/lastName and returns the
+// changed field names. The user is read first so the update preserves other
+// fields; an empty result means profile had no updatable field (no write).
 // GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
 func (c *Client) UpdateUserProfile(ctx context.Context, userID string, profile map[string]any) ([]string, error) {
-	// Extract recognized fields before any API call so a no-op request costs nothing.
 	email, hasEmail := profileString(profile, "email")
 	firstName, hasFirstName := profileString(profile, "firstName")
 	lastName, hasLastName := profileString(profile, "lastName")

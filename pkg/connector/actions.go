@@ -63,8 +63,7 @@ var enableUserSchema = &v2.BatonActionSchema{
 	},
 }
 
-// updatedFieldsReturnType is the {"success": bool, "updated_fields": string} return
-// schema for update_user, reporting which profile fields the call changed.
+// updatedFieldsReturnType is update_user's return schema: success plus updated_fields.
 var updatedFieldsReturnType = []*config.Field{
 	{Name: retSuccessKey, DisplayName: "Success", Field: &config.Field_BoolField{}},
 	{Name: retUpdatedFieldsKey, DisplayName: "Updated Fields", Field: &config.Field_StringField{}},
@@ -88,8 +87,7 @@ var updateUserSchema = &v2.BatonActionSchema{
 // Compile-time check that Connector implements GlobalActionProvider.
 var _ connectorbuilder.GlobalActionProvider = (*Connector)(nil)
 
-// GlobalActions registers the enable_user / disable_user lifecycle actions and the
-// update_user profile-update action.
+// GlobalActions registers the enable_user, disable_user, and update_user actions.
 func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRegistry) error {
 	if err := registry.Register(ctx, disableUserSchema, c.setEnabledHandler(actionDisableUser, false)); err != nil {
 		return fmt.Errorf("baton-keycloak: register disable_user: %w", err)
@@ -103,10 +101,7 @@ func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRe
 	return nil
 }
 
-// updateUserHandler updates a user's profile attributes from the user_profile
-// argument. C1 sends user_profile as a JSON string (push rules) or a struct
-// (manual invocation); both are handled. A request with no updatable field is
-// rejected as InvalidArgument, and a missing user maps to NotFound.
+// updateUserHandler updates a user's profile attributes from the user_profile argument.
 func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 	userID, err := userIDArg(args)
 	if err != nil {
@@ -139,8 +134,7 @@ func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct
 	return result, nil, nil
 }
 
-// profileArgAsMap reads the user_profile argument as a map, accepting either a
-// JSON string (how push rules send it) or a nested struct (manual invocation).
+// profileArgAsMap reads the user_profile argument as a map from a JSON string or a struct value.
 func profileArgAsMap(args *structpb.Struct, key string) (map[string]any, error) {
 	if args == nil {
 		return nil, fmt.Errorf("%s is required", key)
