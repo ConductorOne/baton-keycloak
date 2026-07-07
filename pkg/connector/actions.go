@@ -113,7 +113,12 @@ func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct
 		return nil, nil, status.Errorf(codes.InvalidArgument, "baton-keycloak: %s: %v", actionUpdateUser, err)
 	}
 
-	updated, err := c.client.UpdateUserProfile(ctx, userID, profile)
+	update, err := profileUpdateFromMap(profile)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "baton-keycloak: %s: %v", actionUpdateUser, err)
+	}
+
+	updated, err := c.client.UpdateUserProfile(ctx, userID, update)
 	if err != nil {
 		if client.IsNotFoundError(err) {
 			return nil, nil, status.Errorf(codes.NotFound, "baton-keycloak: %s: user %s not found", actionUpdateUser, userID)
@@ -134,27 +139,55 @@ func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct
 	return result, nil, nil
 }
 
-// profileArgAsMap reads the user_profile argument as a map from a JSON string or a struct value.
+// profileArgAsMap reads the user_profile argument as a map from a nested struct
+// value or a JSON-string value.
 func profileArgAsMap(args *structpb.Struct, key string) (map[string]any, error) {
-	if args == nil {
-		return nil, fmt.Errorf("%s is required", key)
+	if sv, ok := actions.GetStructArg(args, key); ok {
+		return sv.AsMap(), nil
 	}
-	v, ok := args.GetFields()[key]
-	if !ok || v == nil {
-		return nil, fmt.Errorf("%s is required", key)
-	}
-	switch k := v.GetKind().(type) {
-	case *structpb.Value_StringValue:
+	if s, ok := actions.GetStringArg(args, key); ok {
 		var m map[string]any
-		if err := json.Unmarshal([]byte(k.StringValue), &m); err != nil {
+		if err := json.Unmarshal([]byte(s), &m); err != nil {
 			return nil, fmt.Errorf("invalid %s JSON: %w", key, err)
 		}
 		return m, nil
-	case *structpb.Value_StructValue:
-		return k.StructValue.AsMap(), nil
-	default:
-		return nil, fmt.Errorf("invalid %s format", key)
 	}
+	return nil, fmt.Errorf("%s is required", key)
+}
+
+// profileUpdateFromMap extracts the updatable profile fields, rejecting a value
+// that is present but not a non-empty string (a wrong type or "" would otherwise
+// be silently dropped or wipe the field on the PUT).
+func profileUpdateFromMap(profile map[string]any) (client.UserProfileUpdate, error) {
+	var update client.UserProfileUpdate
+	var err error
+	if update.Email, err = profileStringField(profile, "email"); err != nil {
+		return update, err
+	}
+	if update.FirstName, err = profileStringField(profile, "firstName"); err != nil {
+		return update, err
+	}
+	if update.LastName, err = profileStringField(profile, "lastName"); err != nil {
+		return update, err
+	}
+	return update, nil
+}
+
+// profileStringField returns the value at key: nil when the key is absent (leave
+// unchanged), an error when it is present but not a non-empty string.
+func profileStringField(profile map[string]any, key string) (*string, error) {
+	v, ok := profile[key]
+	if !ok {
+		return nil, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a string", key)
+	}
+	if s == "" {
+		return nil, fmt.Errorf("%s cannot be empty", key)
+	}
+	return &s, nil
 }
 
 // setEnabledHandler builds the handler for a lifecycle action that toggles a

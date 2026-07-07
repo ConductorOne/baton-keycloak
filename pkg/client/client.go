@@ -134,15 +134,20 @@ func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool
 	return nil
 }
 
-// UpdateUserProfile updates a user's email/firstName/lastName and returns the
-// changed field names. The user is read first so the update preserves other
-// fields; an empty result means profile had no updatable field (no write).
+// UserProfileUpdate holds the profile fields update_user can change. A nil field
+// is left unchanged; a non-nil field is written. The caller validates the values.
+type UserProfileUpdate struct {
+	Email     *string
+	FirstName *string
+	LastName  *string
+}
+
+// UpdateUserProfile applies the non-nil fields of update and returns the changed
+// field names. The user is read first so the update preserves other fields; an
+// empty update writes nothing and returns no field names.
 // GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
-func (c *Client) UpdateUserProfile(ctx context.Context, userID string, profile map[string]any) ([]string, error) {
-	email, hasEmail := profileString(profile, "email")
-	firstName, hasFirstName := profileString(profile, "firstName")
-	lastName, hasLastName := profileString(profile, "lastName")
-	if !hasEmail && !hasFirstName && !hasLastName {
+func (c *Client) UpdateUserProfile(ctx context.Context, userID string, update UserProfileUpdate) ([]string, error) {
+	if update.Email == nil && update.FirstName == nil && update.LastName == nil {
 		return nil, nil
 	}
 
@@ -157,16 +162,16 @@ func (c *Client) UpdateUserProfile(ctx context.Context, userID string, profile m
 	}
 
 	var updated []string
-	if hasEmail {
-		user.Email = pointer(email)
+	if update.Email != nil {
+		user.Email = update.Email
 		updated = append(updated, "email")
 	}
-	if hasFirstName {
-		user.FirstName = pointer(firstName)
+	if update.FirstName != nil {
+		user.FirstName = update.FirstName
 		updated = append(updated, "firstName")
 	}
-	if hasLastName {
-		user.LastName = pointer(lastName)
+	if update.LastName != nil {
+		user.LastName = update.LastName
 		updated = append(updated, "lastName")
 	}
 
@@ -175,12 +180,6 @@ func (c *Client) UpdateUserProfile(ctx context.Context, userID string, profile m
 	}
 
 	return updated, nil
-}
-
-// profileString returns the string value at key and whether it was present as a string.
-func profileString(profile map[string]any, key string) (string, bool) {
-	v, ok := profile[key].(string)
-	return v, ok
 }
 
 // GetUserByUsername returns the user matching username exactly, or nil when none exists.
