@@ -152,6 +152,9 @@ func profileArgAsMap(args *structpb.Struct, key string) (map[string]any, error) 
 		}
 		return m, nil
 	}
+	if _, present := args.GetFields()[key]; present {
+		return nil, fmt.Errorf("invalid %s format: expected a JSON object or JSON string", key)
+	}
 	return nil, fmt.Errorf("%s is required", key)
 }
 
