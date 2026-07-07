@@ -5,26 +5,112 @@ on:
   push:
     branches:
       - main
+
+# The connector is exercised against a throwaway Keycloak brought up inside the
+# job (no real tenant, no external credentials). A bootstrap step creates a
+# dedicated realm, a confidential service-account client with realm-management
+# roles, and seed data (a group and a user) whose server-generated IDs are
+# passed to the grant/revoke test as step outputs.
 jobs:
-  test:
-    if: false  # Remove this line to enable integration tests
+  integration:
     runs-on: ubuntu-latest
+    env:
+      BATON_LOG_LEVEL: debug
+      BATON_KEYCLOAK_SERVER_URL: http://localhost:8080
+      BATON_KEYCLOAK_REALM: baton-test
+      BATON_KEYCLOAK_CLIENT_ID: baton
+      BATON_KEYCLOAK_CLIENT_SECRET: test-secret
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Checkout code
-        uses: actions/checkout@v6
-      # Build the connector binary, then run sync-test.
-      # Configure with valid entitlement/principal IDs.
-      # Add additional test jobs as needed.
+
+      - name: Run tests
+        run: go test ./... -count=1
+
       - name: Build baton-keycloak
-        run: go build ./cmd/baton-keycloak
-      - name: Test connector syncing
+        run: go build -o baton-keycloak ./cmd/baton-keycloak
+
+      - name: Start Keycloak
+        run: |
+          docker run -d --name keycloak -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            quay.io/keycloak/keycloak:26.0 start-dev
+
+      - name: Wait for Keycloak
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/realms/master >/dev/null; then
+              echo "Keycloak is ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Keycloak did not become ready in time"
+          docker logs keycloak
+          exit 1
+
+      - name: Bootstrap realm, service-account client and seed data
+        id: seed
+        run: |
+          KC="docker exec keycloak /opt/keycloak/bin/kcadm.sh"
+          $KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
+          $KC create realms -s realm=baton-test -s enabled=true
+          $KC create clients -r baton-test \
+            -s clientId=baton -s enabled=true -s clientAuthenticatorType=client-secret \
+            -s secret=test-secret -s serviceAccountsEnabled=true \
+            -s standardFlowEnabled=false -s directAccessGrantsEnabled=false -s publicClient=false
+          $KC add-roles -r baton-test --uusername service-account-baton --cclientid realm-management \
+            --rolename manage-users --rolename view-users --rolename query-users --rolename query-groups
+          $KC create groups -r baton-test -s name=Engineering
+          $KC create users -r baton-test -s username=dave -s enabled=true \
+            -s email=dave@example.com -s firstName=Dave -s lastName=Davis
+          GROUP_ID=$($KC get groups -r baton-test -q search=Engineering --fields id --format csv --noquotes | tr -d '\r')
+          USER_ID=$($KC get users -r baton-test -q username=dave --fields id --format csv --noquotes | tr -d '\r')
+          echo "group_id=$GROUP_ID" >> "$GITHUB_OUTPUT"
+          echo "user_id=$USER_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Get baton
+        uses: ConductorOne/github-workflows/actions/get-baton@v4
+
+      - name: Test sync
+        run: |
+          ./baton-keycloak
+          baton resources
+          baton entitlements
+          baton grants
+
+      - name: Grant/revoke group membership test
         uses: ConductorOne/github-workflows/actions/sync-test@v4
         with:
           connector: ./baton-keycloak
-          baton-entitlement: '<entitlement-id>'
-          baton-principal: '<principal-id>'
-          baton-principal-type: 'user'
+          baton-entitlement: "group:${{ steps.seed.outputs.group_id }}:member"
+          baton-principal: "${{ steps.seed.outputs.user_id }}"
+          baton-principal-type: "user"
+
+      # Exercises CreateAccount and, because the connector advertises
+      # CAPABILITY_RESOURCE_DELETE, the deprovision path too: the action introspects
+      # capabilities, then creates the account, deletes it, re-deletes (404 handled as
+      # success), and verifies removal. No throwaway seed user needed.
+      - name: Account provisioning + deprovisioning test
+        uses: ConductorOne/github-workflows/actions/account-provisioning@v3
+        with:
+          connector: ./baton-keycloak
+          account-login: "ci.newuser"
+          account-email: "ci.newuser@example.com"
+          search-method: "login"
+
+      # Disable then re-enable the seeded user so it ends the run in its original
+      # (enabled) state. The action re-syncs and asserts STATUS_DISABLED / STATUS_ENABLED
+      # after each step; both handlers are idempotent.
+      - name: Account status lifecycle (enable/disable) test
+        uses: ConductorOne/github-workflows/actions/account-status-lifecycle-test@v3
+        with:
+          connector: ./baton-keycloak
+          account-id: "${{ steps.seed.outputs.user_id }}"
+          test-flow: disable-enable

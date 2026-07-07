@@ -9,6 +9,7 @@ import (
 
 	"github.com/Clarilab/gocloaksession"
 	"github.com/Nerzal/gocloak/v13"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 )
 
 type Client struct {
@@ -38,6 +39,8 @@ func NewClient(serverURL, realm, clientID, clientSecret string) (*Client, error)
 	}, nil
 }
 
+// AddUserToGroup adds a user to a group.
+// PUT {{base_url}}/admin/realms/{realm}/users/{userId}/groups/{groupId}.
 func (c *Client) AddUserToGroup(ctx context.Context, userID, groupID string) error {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -47,6 +50,8 @@ func (c *Client) AddUserToGroup(ctx context.Context, userID, groupID string) err
 	return c.client.AddUserToGroup(ctx, token.AccessToken, c.realm, userID, groupID)
 }
 
+// RemoveUserFromGroup removes a user from a group.
+// DELETE {{base_url}}/admin/realms/{realm}/users/{userId}/groups/{groupId}.
 func (c *Client) RemoveUserFromGroup(ctx context.Context, userID, groupID string) error {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -56,6 +61,170 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, userID, groupID string
 	return c.client.DeleteUserFromGroup(ctx, token.AccessToken, c.realm, userID, groupID)
 }
 
+// CreateUser creates a user in the realm and returns the new user's ID.
+// POST {{base_url}}/admin/realms/{realm}/users.
+func (c *Client) CreateUser(ctx context.Context, user gocloak.User) (string, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	userID, err := c.client.CreateUser(ctx, token.AccessToken, c.realm, user)
+	if err != nil {
+		return "", uhttp.WrapErrors(MapAPIError(err), "failed to create user", err)
+	}
+
+	return userID, nil
+}
+
+// GetUserByID fetches a single user by ID.
+// GET {{base_url}}/admin/realms/{realm}/users/{id}.
+func (c *Client) GetUserByID(ctx context.Context, userID string) (*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
+	}
+
+	return user, nil
+}
+
+// DeleteUser permanently removes a user.
+// DELETE {{base_url}}/admin/realms/{realm}/users/{id}.
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	if err := c.client.DeleteUser(ctx, token.AccessToken, c.realm, userID); err != nil {
+		return uhttp.WrapErrors(MapAPIError(err), "failed to delete user", err)
+	}
+
+	return nil
+}
+
+// SetUserEnabled toggles a user's enabled flag, reading the user first so the
+// update preserves other fields and is skipped when already in that state.
+// GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
+func (c *Client) SetUserEnabled(ctx context.Context, userID string, enabled bool) error {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
+	}
+
+	if user.Enabled != nil && *user.Enabled == enabled {
+		return nil
+	}
+
+	user.Enabled = pointer(enabled)
+	if err := c.client.UpdateUser(ctx, token.AccessToken, c.realm, *user); err != nil {
+		return uhttp.WrapErrors(MapAPIError(err), "failed to update user enabled state", err)
+	}
+
+	return nil
+}
+
+// UserProfileUpdate holds the profile fields update_user can change. A nil field
+// is left unchanged; a non-nil field is written. The caller validates the values.
+type UserProfileUpdate struct {
+	Email     *string
+	FirstName *string
+	LastName  *string
+}
+
+// UpdateUserProfile applies the non-nil fields of update and returns the changed
+// field names. The user is read first so the update preserves other fields; an
+// empty update writes nothing and returns no field names.
+// GET then PUT {{base_url}}/admin/realms/{realm}/users/{id}.
+func (c *Client) UpdateUserProfile(ctx context.Context, userID string, update UserProfileUpdate) ([]string, error) {
+	if update.Email == nil && update.FirstName == nil && update.LastName == nil {
+		return nil, nil
+	}
+
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	user, err := c.client.GetUserByID(ctx, token.AccessToken, c.realm, userID)
+	if err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to get user by id", err)
+	}
+
+	var updated []string
+	if update.Email != nil {
+		user.Email = update.Email
+		updated = append(updated, "email")
+	}
+	if update.FirstName != nil {
+		user.FirstName = update.FirstName
+		updated = append(updated, "firstName")
+	}
+	if update.LastName != nil {
+		user.LastName = update.LastName
+		updated = append(updated, "lastName")
+	}
+
+	if err := c.client.UpdateUser(ctx, token.AccessToken, c.realm, *user); err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), "failed to update user profile", err)
+	}
+
+	return updated, nil
+}
+
+// GetUserByUsername returns the user matching username exactly, or nil when none exists.
+// GET {{base_url}}/admin/realms/{realm}/users?username={username}&exact=true.
+func (c *Client) GetUserByUsername(ctx context.Context, username string) (*gocloak.User, error) {
+	return c.getUserByExactParams(ctx, gocloak.GetUsersParams{
+		Username: pointer(username),
+		Exact:    pointer(true),
+		Max:      pointer(1),
+	}, "username")
+}
+
+// GetUserByEmail returns the user matching email exactly, or nil when none exists.
+// GET {{base_url}}/admin/realms/{realm}/users?email={email}&exact=true.
+func (c *Client) GetUserByEmail(ctx context.Context, email string) (*gocloak.User, error) {
+	return c.getUserByExactParams(ctx, gocloak.GetUsersParams{
+		Email: pointer(email),
+		Exact: pointer(true),
+		Max:   pointer(1),
+	}, "email")
+}
+
+// getUserByExactParams runs an exact-match user lookup and returns the single
+// result, or nil when none exists; field names the lookup key for the error message.
+// GET {{base_url}}/admin/realms/{realm}/users.
+func (c *Client) getUserByExactParams(ctx context.Context, params gocloak.GetUsersParams, field string) (*gocloak.User, error) {
+	token, err := c.session.GetKeycloakAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, params)
+	if err != nil {
+		return nil, uhttp.WrapErrors(MapAPIError(err), fmt.Sprintf("failed to get user by %s", field), err)
+	}
+
+	if len(users) == 0 {
+		return nil, nil
+	}
+
+	return users[0], nil
+}
+
+// GetUsers returns a page of realm users.
+// GET {{base_url}}/admin/realms/{realm}/users.
 func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -81,6 +250,8 @@ func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, stri
 	return users, nextToken, nil
 }
 
+// GetGroupMembers returns a page of a group's members.
+// GET {{base_url}}/admin/realms/{realm}/groups/{groupId}/members.
 func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int) ([]*gocloak.User, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -109,6 +280,8 @@ func (c *Client) GetGroupMembers(ctx context.Context, groupID string, first int)
 	return members, nextToken, nil
 }
 
+// GetGroups returns a page of top-level realm groups.
+// GET {{base_url}}/admin/realms/{realm}/groups.
 func (c *Client) GetGroups(ctx context.Context, first int) ([]*Group, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -153,6 +326,8 @@ func (c *Client) GetGroups(ctx context.Context, first int) ([]*Group, string, er
 	return result, nextToken, nil
 }
 
+// GetUserGroups returns the groups a user belongs to.
+// GET {{base_url}}/admin/realms/{realm}/users/{userId}/groups.
 func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.Group, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -162,6 +337,8 @@ func (c *Client) GetUserGroups(ctx context.Context, userID string) ([]*gocloak.G
 	return c.client.GetUserGroups(ctx, token.AccessToken, c.realm, userID, gocloak.GetGroupsParams{})
 }
 
+// GetGroupChildren returns a page of a group's child (sub)groups.
+// GET {{base_url}}/admin/realms/{realm}/groups/{groupId}/children.
 func (c *Client) GetGroupChildren(ctx context.Context, groupID string, first int) ([]*Group, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
@@ -205,6 +382,8 @@ func (c *Client) GetGroupChildren(ctx context.Context, groupID string, first int
 	return result, nextToken, nil
 }
 
+// GetKeycloakVersion returns the server's major version.
+// GET {{base_url}}/admin/serverinfo.
 func (c *Client) GetKeycloakVersion(ctx context.Context) (int, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
