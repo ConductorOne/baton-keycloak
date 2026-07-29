@@ -12,6 +12,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/actions"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -108,6 +110,9 @@ func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct
 		return nil, nil, err
 	}
 
+	l := ctxzap.Extract(ctx)
+	l.Info("Starting update_user operation", zap.String("user_id", userID))
+
 	profile, err := profileArgAsMap(args, argUserProfileKey)
 	if err != nil {
 		return nil, nil, status.Errorf(codes.InvalidArgument, "baton-keycloak: %s: %v", actionUpdateUser, err)
@@ -136,6 +141,10 @@ func (c *Connector) updateUserHandler(ctx context.Context, args *structpb.Struct
 	if err != nil {
 		return nil, nil, fmt.Errorf("baton-keycloak: %s: build result: %w", actionUpdateUser, err)
 	}
+	l.Info("Successfully updated user",
+		zap.String("user_id", userID),
+		zap.String(retUpdatedFieldsKey, strings.Join(updated, ", ")),
+	)
 	return result, nil, nil
 }
 
@@ -203,12 +212,17 @@ func (c *Connector) setEnabledHandler(actionName string, enabled bool) actions.A
 			return nil, nil, err
 		}
 
+		l := ctxzap.Extract(ctx)
+		l.Info("Starting "+actionName+" operation", zap.String("user_id", userID))
+
 		if err := c.client.SetUserEnabled(ctx, userID, enabled); err != nil {
 			if client.IsNotFoundError(err) {
 				return nil, nil, status.Errorf(codes.NotFound, "baton-keycloak: %s: user %s not found", actionName, userID)
 			}
 			return nil, nil, fmt.Errorf("baton-keycloak: %s user %s: %w", actionName, userID, err)
 		}
+
+		l.Info("Successfully completed "+actionName+" operation", zap.String("user_id", userID))
 
 		return successStruct(), nil, nil
 	}
