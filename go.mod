@@ -5,7 +5,7 @@ go 1.25.2
 require (
 	github.com/Clarilab/gocloaksession v1.14.0
 	github.com/Nerzal/gocloak/v13 v13.9.0
-	github.com/conductorone/baton-sdk v0.24.6
+	github.com/conductorone/baton-sdk v0.25.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
