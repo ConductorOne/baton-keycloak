@@ -49,7 +49,7 @@ docker run --rm -v $(pwd):/out \
   -e BATON_KEYCLOAK_CLIENT_ID="$KEYCLOAK_CLIENT_ID" \
   -e BATON_KEYCLOAK_CLIENT_SECRET="$KEYCLOAK_CLIENT_SECRET" \
   -e BATON_SYNC_SUB_GROUPS=true \
-  ghcr.io/conductorone/baton-keycloak:latest -f "/out/sync.c1z"
+  public.ecr.aws/conductorone/baton-keycloak:latest -f "/out/sync.c1z"
 
 docker run --rm -v $(pwd):/out ghcr.io/conductorone/baton:latest -f "/out/sync.c1z" resources
 ```
