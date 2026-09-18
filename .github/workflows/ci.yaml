@@ -109,7 +109,7 @@ jobs:
       # (enabled) state. The action re-syncs and asserts STATUS_DISABLED / STATUS_ENABLED
       # after each step; both handlers are idempotent.
       - name: Account status lifecycle (enable/disable) test
-        uses: ConductorOne/github-workflows/actions/account-status-lifecycle-test@v3
+        uses: ConductorOne/github-workflows/actions/account-status-lifecycle-test@v4
         with:
           connector: ./baton-keycloak
           account-id: "${{ steps.seed.outputs.user_id }}"
