@@ -293,9 +293,7 @@ func (o *groupBuilder) parseIntoGroupResource(group *client.Group, parentResourc
 		}
 	}
 
-	groupTraits := []rs.GroupTraitOption{
-		rs.WithGroupProfile(profile),
-	}
+	groupTraits := []rs.GroupTraitOption{}
 
 	var annotations []proto.Message
 	// Add ChildResourceType annotation if syncSubGroups is enabled and the group has children
@@ -310,6 +308,7 @@ func (o *groupBuilder) parseIntoGroupResource(group *client.Group, parentResourc
 		groupResourceType,
 		*group.ID,
 		groupTraits,
+		rs.WithResourceProfile(profile),
 		rs.WithParentResourceID(parentResourceID),
 		rs.WithAnnotation(annotations...),
 	)
