@@ -11,15 +11,17 @@ import (
 // tokenErrorCode maps a GetKeycloakAuthToken error to the closest gRPC status
 // code. Unlike MapAPIError, 404 maps to Unauthenticated (not NotFound): a
 // missing realm/client at login time is a configuration/credential failure,
-// and NotFound would fail the CLI's auth check. Non-APIError failures (dial
-// errors, timeouts) are transient, so they map to Unavailable rather than
-// Unauthenticated.
+// and NotFound would fail the CLI's auth check. Transport failures are
+// transient, so they map to Unavailable: gocloak reports dial errors,
+// timeouts and an empty response as an APIError with Code 0.
 func tokenErrorCode(err error) codes.Code {
 	var apiErr *gocloak.APIError
 	if !errors.As(err, &apiErr) {
 		return codes.Unavailable
 	}
 	switch {
+	case apiErr.Code == 0:
+		return codes.Unavailable
 	case apiErr.Code == http.StatusForbidden:
 		return codes.PermissionDenied
 	case apiErr.Code == http.StatusTooManyRequests, apiErr.Code >= http.StatusInternalServerError:

@@ -29,6 +29,8 @@ func TestTokenErrorCode(t *testing.T) {
 		{"404 not found", wrapAPIErr(404), codes.Unauthenticated},
 		{"429 too many requests", wrapAPIErr(429), codes.Unavailable},
 		{"500 internal server error", wrapAPIErr(500), codes.Unavailable},
+		// gocloak wraps dial errors, timeouts and an empty response as Code 0.
+		{"transport failure as APIError code 0", wrapAPIErr(0), codes.Unavailable},
 		{"non-APIError dial failure", errors.New("dial tcp: connection refused"), codes.Unavailable},
 	}
 
