@@ -10,6 +10,7 @@ import (
 	"github.com/Clarilab/gocloaksession"
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
 )
 
 type Client struct {
@@ -228,7 +229,10 @@ func (c *Client) getUserByExactParams(ctx context.Context, params gocloak.GetUse
 func (c *Client) GetUsers(ctx context.Context, first int) ([]*gocloak.User, string, error) {
 	token, err := c.session.GetKeycloakAuthToken()
 	if err != nil {
-		return nil, strconv.Itoa(first), fmt.Errorf("failed to get token: %w", err)
+		// Can't obtain an admin token at all (bad client secret, missing realm, etc.):
+		// Unauthenticated regardless of the login call's underlying HTTP status, since
+		// MapAPIError would turn e.g. a "realm not found" 404 into NotFound instead.
+		return nil, strconv.Itoa(first), uhttp.WrapErrors(codes.Unauthenticated, "failed to get token", err)
 	}
 	users, err := c.client.GetUsers(ctx, token.AccessToken, c.realm, gocloak.GetUsersParams{
 		First: pointer(first),
