@@ -282,10 +282,8 @@ func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) 
 	}
 
 	userTraits := []rs.UserTraitOption{
-		rs.WithUserProfile(profile),
 		rs.WithUserLogin(username),
 		rs.WithEmail(email, true),
-		rs.WithStatus(userStatus),
 	}
 
 	ret, err := rs.NewUserResource(
@@ -293,6 +291,8 @@ func parseIntoUserResource(user *gocloak.User, parentResourceID *v2.ResourceId) 
 		userResourceType,
 		safeString(user.ID),
 		userTraits,
+		rs.WithResourceProfile(profile),
+		rs.WithResourceStatus(v2.Status_ResourceStatus(userStatus), ""),
 		rs.WithParentResourceID(parentResourceID),
 	)
 	if err != nil {
